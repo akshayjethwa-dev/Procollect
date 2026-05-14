@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FileUp, Loader2, AlertCircle, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { FileUp, Loader2, AlertCircle, Image as ImageIcon, AlertTriangle, Edit2, Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -11,7 +11,6 @@ import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
-
 export default function ImportScreen() {
   const [file, setFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -19,10 +18,32 @@ export default function ImportScreen() {
   const [extractedData, setExtractedData] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // ✅ NEW: Live extraction status shown to user
   const [extractionStatus, setExtractionStatus] = useState("Processing...");
   const navigate = useNavigate();
 
+  // --- NEW STATES FOR EDITING & DUPLICATE CHECKING ---
+  const [existingLoanIds, setExistingLoanIds] = useState<Set<string>>(new Set());
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<any>(null);
+
+  // Fetch existing loan IDs on mount to flag duplicates in real-time
+  useEffect(() => {
+    const fetchExistingLoans = async () => {
+      if (auth.currentUser) {
+        try {
+          const existingQuery = query(
+            collection(db, 'customers'),
+            where('assignedAgentId', '==', auth.currentUser.uid)
+          );
+          const existingDocs = await getDocs(existingQuery);
+          setExistingLoanIds(new Set(existingDocs.docs.map(d => String(d.data().loanId))));
+        } catch (error) {
+          console.error("Failed to fetch existing loans", error);
+        }
+      }
+    };
+    fetchExistingLoans();
+  }, []);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFile(acceptedFiles[0]);
@@ -30,7 +51,6 @@ export default function ImportScreen() {
     setUploadProgress(0);
     setExtractionStatus("Processing...");
   }, []);
-
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -44,7 +64,6 @@ export default function ImportScreen() {
     multiple: false
   } as any);
 
-
   const mapRowsToCustomers = (data: any[]) => {
     return data.map(row => ({
       name: row['Name'] || row['Customer Name'] || row['name'] || 'Unknown',
@@ -56,7 +75,6 @@ export default function ImportScreen() {
       needsReview: false,
     })).filter(item => item.loanId && item.name !== 'Unknown');
   };
-
 
   const handleProcessFile = async () => {
     if (!file) return;
@@ -74,7 +92,6 @@ export default function ImportScreen() {
     try {
       const fileExt = file.name.split('.').pop()?.toLowerCase();
 
-      // -- USER STORY 2.3: CSV PARSING --
       if (fileExt === 'csv') {
         setExtractionStatus("Parsing CSV file...");
         Papa.parse(file, {
@@ -90,27 +107,19 @@ export default function ImportScreen() {
           }
         });
         return;
-      }
-
-      // -- USER STORY 2.3: EXCEL PARSING --
-      else if (fileExt === 'xlsx' || fileExt === 'xls') {
+      } else if (fileExt === 'xlsx' || fileExt === 'xls') {
         setExtractionStatus("Parsing Excel file...");
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
         setExtractedData(mapRowsToCustomers(data));
-      }
-
-      // -- USER STORY 2.1 & 2.2: UPLOAD + AI EXTRACTION --
-      else {
-        // Step 1: Upload to Firebase Storage
+      } else {
         setExtractionStatus("Uploading document securely...");
         const { url, path } = await uploadFieldDocument(file, (progress) => {
           setUploadProgress(Math.round(progress));
         });
 
-        // Step 2: Read file as Base64
         setExtractionStatus("Preparing document for AI analysis...");
         const reader = new FileReader();
         const fileData = await new Promise<string>((resolve, reject) => {
@@ -119,13 +128,11 @@ export default function ImportScreen() {
           reader.readAsDataURL(file);
         });
 
-        // Step 3: Send to Gemini AI with live progress callback
         setUploadProgress(100);
         const data = await extractDataFromPDF(
           fileData,
           file.type,
           url,
-          // ✅ NEW: Pass progress callback so UI updates live
           (msg) => setExtractionStatus(msg)
         );
 
@@ -145,6 +152,29 @@ export default function ImportScreen() {
     }
   };
 
+  // --- NEW EDITING HANDLERS ---
+  const handleEditClick = (index: number, item: any) => {
+    setEditingIndex(index);
+    setEditForm({ ...item });
+  };
+
+  const handleSaveEdit = (index: number) => {
+    const updatedData = [...extractedData];
+    updatedData[index] = editForm;
+    setExtractedData(updatedData);
+    setEditingIndex(null);
+    setEditForm(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingIndex(null);
+    setEditForm(null);
+  };
+
+  const handleFormChange = (field: string, value: any) => {
+    setEditForm((prev: any) => ({ ...prev, [field]: value }));
+  };
+  // -----------------------------
 
   const handleImport = async () => {
     if (!auth.currentUser) return setError("Please log in again.");
@@ -153,14 +183,16 @@ export default function ImportScreen() {
     setError(null);
 
     try {
+      // Re-fetch right before saving just to be perfectly accurate
       const existingQuery = query(
         collection(db, 'customers'),
         where('assignedAgentId', '==', auth.currentUser.uid)
       );
       const existingDocs = await getDocs(existingQuery);
-      const existingLoanIds = new Set(existingDocs.docs.map(d => d.data().loanId));
+      const freshExistingLoanIds = new Set(existingDocs.docs.map(d => String(d.data().loanId)));
 
-      const finalDataToImport = extractedData.filter(item => !existingLoanIds.has(item.loanId));
+      // Filter out duplicates (incorporates user edits)
+      const finalDataToImport = extractedData.filter(item => !freshExistingLoanIds.has(String(item.loanId)));
 
       if (finalDataToImport.length === 0) {
         throw new Error("All items in this list are already in your database (duplicate Loan IDs).");
@@ -195,12 +227,13 @@ export default function ImportScreen() {
     }
   };
 
-
-  // ✅ NEW: Determine the loading message shown during AI extraction
   const loadingLabel = uploadProgress > 0 && uploadProgress < 100
     ? `Uploading securely... ${uploadProgress}%`
     : extractionStatus;
 
+  // Calculate stats for UI
+  const duplicateCount = extractedData.filter(item => existingLoanIds.has(String(item.loanId))).length;
+  const validCount = extractedData.length - duplicateCount;
 
   return (
     <div className="p-6 space-y-8">
@@ -210,8 +243,6 @@ export default function ImportScreen() {
       </div>
 
       <AnimatePresence mode="wait">
-
-        {/* ── STEP 1: File picker + Process button ── */}
         {!extractedData.length && !processing && (
           <motion.div
             key="upload"
@@ -246,7 +277,6 @@ export default function ImportScreen() {
           </motion.div>
         )}
 
-        {/* ── STEP 2: Processing / AI extraction spinner ── */}
         {processing && (
           <motion.div
             key="processing"
@@ -256,14 +286,11 @@ export default function ImportScreen() {
             className="flex flex-col items-center justify-center py-20 space-y-5"
           >
             <Loader2 size={48} className="text-brand-600 animate-spin" />
-
-            {/* ✅ NEW: Live status message updates as extraction progresses */}
             <p className="font-bold text-slate-700 text-center">{loadingLabel}</p>
             <p className="text-xs text-slate-400 text-center max-w-xs">
               Large documents with many records can take 2–3 minutes. Please keep this screen open.
             </p>
 
-            {/* Upload progress bar */}
             {uploadProgress > 0 && uploadProgress < 100 && (
               <div className="w-64 h-2 bg-slate-100 rounded-full overflow-hidden">
                 <div
@@ -273,7 +300,6 @@ export default function ImportScreen() {
               </div>
             )}
 
-            {/* AI processing dots animation (shown after upload completes) */}
             {uploadProgress === 100 && (
               <div className="flex space-x-1.5 mt-2">
                 {[0, 1, 2].map(i => (
@@ -289,7 +315,6 @@ export default function ImportScreen() {
           </motion.div>
         )}
 
-        {/* ── STEP 3: Preview extracted records + Import button ── */}
         {extractedData.length > 0 && !processing && (
           <motion.div
             key="preview"
@@ -298,9 +323,14 @@ export default function ImportScreen() {
             className="space-y-6"
           >
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-slate-900">
-                Extracted ({extractedData.length} records)
-              </h2>
+              <div>
+                <h2 className="font-bold text-slate-900">Extracted ({extractedData.length} records)</h2>
+                {duplicateCount > 0 && (
+                  <p className="text-xs text-amber-600 font-medium mt-1">
+                    {duplicateCount} duplicate(s) found. They will be skipped on import.
+                  </p>
+                )}
+              </div>
               <button
                 onClick={() => { setExtractedData([]); setFile(null); }}
                 className="text-brand-600 font-bold text-sm"
@@ -310,55 +340,144 @@ export default function ImportScreen() {
             </div>
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 pb-10">
-              {extractedData.map((item, i) => (
-                <div
-                  key={i}
-                  className={`premium-card p-4 flex justify-between items-start border-l-4 ${
-                    item.needsReview
-                      ? 'border-amber-400 bg-amber-50/30'
-                      : 'border-brand-500'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-bold text-slate-900">{item.name}</h4>
-                      {item.needsReview && (
-                        <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">
-                          <AlertTriangle size={10} className="mr-1" /> Review
-                        </span>
-                      )}
+              {extractedData.map((item, i) => {
+                const isEditing = editingIndex === i;
+                const activeData = isEditing ? editForm : item;
+                const isDuplicate = existingLoanIds.has(String(activeData.loanId));
+
+                // --- EDIT MODE VIEW ---
+                if (isEditing) {
+                  return (
+                    <div key={i} className="premium-card p-4 border-2 border-brand-500 shadow-lg space-y-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-bold text-slate-700 text-sm">Edit Record</span>
+                        {isDuplicate && (
+                          <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-md">
+                            ⚠️ Duplicate Loan ID
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Customer Name</label>
+                          <input type="text" value={editForm.name} onChange={e => handleFormChange('name', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        </div>
+                        
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Loan ID</label>
+                          <input type="text" value={editForm.loanId} onChange={e => handleFormChange('loanId', e.target.value)} className={`w-full mt-1 px-3 py-2 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 ${isDuplicate ? 'border-red-400 text-red-700' : 'border-slate-200'}`} />
+                        </div>
+                        
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Mobile</label>
+                          <input type="text" value={editForm.mobile} onChange={e => handleFormChange('mobile', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Due Amount</label>
+                          <input type="number" value={editForm.dueAmount} onChange={e => handleFormChange('dueAmount', Number(e.target.value))} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Due Date</label>
+                          <input type="date" value={editForm.dueDate} onChange={e => handleFormChange('dueDate', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        </div>
+
+                        <div className="col-span-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Address</label>
+                          <input type="text" value={editForm.address} onChange={e => handleFormChange('address', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        </div>
+
+                        <div className="col-span-2 flex items-center space-x-2 mt-1">
+                          <input type="checkbox" id={`review-${i}`} checked={editForm.needsReview} onChange={e => handleFormChange('needsReview', e.target.checked)} className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500" />
+                          <label htmlFor={`review-${i}`} className="text-sm font-medium text-slate-700 cursor-pointer">Needs Manual Review Flag</label>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end space-x-2 mt-4 pt-4 border-t border-slate-100">
+                        <button onClick={handleCancelEdit} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 flex items-center">
+                          <X size={14} className="mr-1" /> Cancel
+                        </button>
+                        <button onClick={() => handleSaveEdit(i)} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 rounded-lg hover:bg-brand-700 flex items-center">
+                          <Check size={14} className="mr-1" /> Save
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-500 font-medium">
-                      {item.loanId} • {item.mobile}
-                    </p>
-                    <p className="text-[10px] text-slate-400 mt-1 max-w-50 truncate">
-                      {item.address}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-slate-900">{formatCurrency(item.dueAmount)}</div>
-                    <div className="text-[10px] font-bold text-orange-600 uppercase">
-                      Due: {item.dueDate}
+                  );
+                }
+
+                // --- READ-ONLY VIEW ---
+                return (
+                  <div
+                    key={i}
+                    className={`premium-card p-4 border-l-4 flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${
+                      isDuplicate 
+                        ? 'border-red-400 bg-red-50/50 opacity-75' 
+                        : item.needsReview
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-brand-500'
+                    }`}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2">
+                        <h4 className={`font-bold ${isDuplicate ? 'text-red-900 line-through' : 'text-slate-900'}`}>
+                          {item.name}
+                        </h4>
+                        {item.needsReview && !isDuplicate && (
+                          <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">
+                            <AlertTriangle size={10} className="mr-1" /> Review
+                          </span>
+                        )}
+                        {isDuplicate && (
+                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
+                            Duplicate (Skipped)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        <span className={isDuplicate ? 'text-red-500 font-bold' : ''}>{item.loanId}</span> • {item.mobile}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1 line-clamp-1">
+                        {item.address}
+                      </p>
+                    </div>
+                    
+                    <div className="flex items-center justify-between sm:flex-col sm:items-end w-full sm:w-auto gap-2">
+                      <div className="text-left sm:text-right">
+                        <div className={`font-bold ${isDuplicate ? 'text-slate-400' : 'text-slate-900'}`}>
+                          {formatCurrency(item.dueAmount)}
+                        </div>
+                        <div className="text-[10px] font-bold text-orange-600 uppercase">
+                          Due: {item.dueDate}
+                        </div>
+                      </div>
+                      
+                      <button 
+                        onClick={() => handleEditClick(i, item)}
+                        className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                        title="Edit Row"
+                      >
+                        <Edit2 size={16} />
+                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <button
               onClick={handleImport}
-              disabled={loading}
-              className="w-full bg-brand-600 text-white p-5 rounded-2xl font-bold shadow-lg shadow-brand-100 flex items-center justify-center gap-2"
+              disabled={loading || validCount === 0}
+              className="w-full bg-brand-600 text-white p-5 rounded-2xl font-bold shadow-lg shadow-brand-100 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loading && <Loader2 className="w-5 h-5 animate-spin" />}
-              {loading ? "Saving to Database..." : `Import ${extractedData.length} Records`}
+              {loading ? "Saving to Database..." : `Import ${validCount} Valid Records`}
             </button>
           </motion.div>
         )}
-
       </AnimatePresence>
 
-      {/* ── Error Banner ── */}
       {error && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
