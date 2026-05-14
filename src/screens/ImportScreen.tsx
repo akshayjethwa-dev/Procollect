@@ -219,18 +219,21 @@ export default function ImportScreen() {
         
         batch.set(customerDocRef, {
           id: customerDocRef.id,
-          name: item.name,
-          mobile: item.mobile,
-          address: item.address,
-          loanId: item.loanId,
+          // ✅ FIX: Added fallback defaults ( || '' ) to prevent undefined Firestore errors
+          name: item.name || 'Unknown',
+          mobile: item.mobile || '',
+          address: item.address || '', 
+          loanId: item.loanId || '',
+          
           // Support both legacy and new aggregate fields to keep the UI fully backwards compatible
           dueAmount: Number(item.dueAmount) || 0,
           totalDueAmount: Number(item.dueAmount) || 0,
-          dueDate: item.dueDate,
+          dueDate: item.dueDate || new Date().toISOString().split('T')[0],
+          
           receivedAmount: 0,
           totalReceivedAmount: 0,
           status: 'Pending',
-          assignedAgentId: auth.currentUser?.uid,
+          assignedAgentId: auth.currentUser?.uid || null,
           batchId: batchDocRef.id,
           createdAt: new Date().toISOString(),
           needsReview: item.needsReview || false

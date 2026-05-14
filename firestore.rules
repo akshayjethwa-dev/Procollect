@@ -12,7 +12,7 @@ service cloud.firestore {
     function isSubscribed() {
       // DEVELOPMENT/PILOT MODE: Allow all authenticated users to bypass subscription check.
       // PRODUCTION MODE: Once your backend/Razorpay is ready, delete 'return true;' and uncomment the line below.
-      return true; 
+      return true;
       // return request.auth.token.isSubscribed == true;
     }
 
@@ -25,13 +25,18 @@ service cloud.firestore {
     match /customers/{customerId} {
       // Agents can only read customers assigned to them
       allow read: if isAuthenticated() && resource.data.assignedAgentId == request.auth.uid;
-      
       // Agents can only create/update if they are assigned
       allow create, update: if isAuthenticated() 
         && request.resource.data.assignedAgentId == request.auth.uid
         && isSubscribed();
-      
       allow delete: if false; // Prevent accidental deletion of financial records
+    }
+
+    // ✅ FIX: Added rules for Batches (Used by ImportScreen)
+    match /batches/{batchId} {
+      allow read: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
     }
 
     // Proactively added: Rules for Interactions (used in CollectionUpdateScreen)

@@ -9,7 +9,7 @@ if (!process.env.GEMINI_API_KEY) {
   process.exit(1);
 }
 
-// ✅ FIX 1: non-null assertion (!) tells TypeScript the key is definitely a string here
+// non-null assertion (!) tells TypeScript the key is definitely a string here
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 async function startServer() {
@@ -31,7 +31,7 @@ async function startServer() {
       if (!fileBase64) return res.status(400).json({ error: "fileBase64 is required." });
       if (!mimeType)   return res.status(400).json({ error: "mimeType is required." });
 
-      // ✅ FIX 2: Use gemini-2.0-flash (gemini-1.5-flash returns 404 NOT_FOUND)
+      // Use gemini-2.0-flash (established models are less prone to capacity 503s)
       const MODEL = "gemini-2.5-flash";
 
       const prompt = `
@@ -52,48 +52,72 @@ async function startServer() {
         Return ONLY a valid JSON array. No markdown, no code blocks, no explanation.
       `;
 
-      // ✅ FIX 3: contents must be an ARRAY
-      const response = await ai.models.generateContent({
-        model: MODEL,
-        contents: [
-          {
-            role: "user",
-            parts: [
+      // Type the response as any to prevent strict TS errors, or use optional chaining below
+      let response: any;
+      let retries = 3; // Number of times to retry
+      let delayMs = 2000; // Start with a 2-second delay
+
+      // Exponential Backoff Retry loop for 503 Errors
+      while (retries > 0) {
+        try {
+          response = await ai.models.generateContent({
+            model: MODEL,
+            contents: [
               {
-                inlineData: {
-                  data: fileBase64,
-                  mimeType: mimeType,
+                role: "user",
+                parts: [
+                  {
+                    inlineData: {
+                      data: fileBase64,
+                      mimeType: mimeType,
+                    },
+                  },
+                  { text: prompt },
+                ],
+              },
+            ],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name:        { type: Type.STRING },
+                    mobile:      { type: Type.STRING },
+                    address:     { type: Type.STRING },
+                    dueAmount:   { type: Type.NUMBER },
+                    dueDate:     { type: Type.STRING },
+                    loanId:      { type: Type.STRING },
+                    area:        { type: Type.STRING },
+                    needsReview: { type: Type.BOOLEAN },
+                  },
+                  required: ["name", "dueAmount", "needsReview"],
                 },
               },
-              { text: prompt },
-            ],
-          },
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name:        { type: Type.STRING },
-                mobile:      { type: Type.STRING },
-                address:     { type: Type.STRING },
-                dueAmount:   { type: Type.NUMBER },
-                dueDate:     { type: Type.STRING },
-                loanId:      { type: Type.STRING },
-                area:        { type: Type.STRING },
-                needsReview: { type: Type.BOOLEAN },
-              },
-              required: ["name", "dueAmount", "needsReview"],
             },
-          },
-        },
-      });
+          });
+          break; // If successful, break out of the retry loop
 
-      // ✅ FIX 4: response.text is a GETTER (not a method) in @google/genai SDK
-      // Access it as a property, then handle undefined with nullish coalescing
-      const rawText: string = response.text ?? "";
+        } catch (apiError: any) {
+          const errMsg: string = apiError?.message || JSON.stringify(apiError) || "";
+          
+          // Only retry if it's a 503 / UNAVAILABLE error
+          if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand")) {
+            retries--;
+            if (retries === 0) throw apiError; // Out of retries, throw to the main catch block
+            
+            console.warn(`[Gemini] 503 High Demand. Retrying in ${delayMs}ms... (${retries} retries left)`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            delayMs *= 2; // Double the delay for the next attempt (4s, 8s...)
+          } else {
+            throw apiError; // If it's a different error (e.g., 400, 403), throw immediately
+          }
+        }
+      }
+
+      // ✅ FIX: Added optional chaining (?.) so TS knows to safely handle undefined
+      const rawText: string = response?.text ?? "";
       console.log("[Gemini] Response preview:", rawText.substring(0, 300));
 
       if (!rawText.trim()) return res.json([]);
@@ -131,6 +155,11 @@ async function startServer() {
       if (msg.includes("quota") || msg.includes("429"))      return res.status(500).json({ error: "Gemini quota exceeded. Try again in a minute." });
       if (msg.includes("NOT_FOUND") || msg.includes("404"))  return res.status(500).json({ error: "Gemini model not found." });
       if (msg.includes("SAFETY"))                            return res.status(500).json({ error: "Document blocked by safety filters." });
+      
+      // Explicitly catch 503s that exhausted all retries and send a friendly message
+      if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand")) {
+          return res.status(503).json({ error: "The AI service is currently experiencing extremely high demand. Please try uploading your document again in a few minutes." });
+      }
 
       res.status(500).json({ error: "Failed to process document via AI." });
     }
