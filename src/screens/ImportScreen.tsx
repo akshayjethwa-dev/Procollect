@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { extractDataFromPDF } from '../services/geminiService';
-import { db, auth, collection, doc, writeBatch, getDocs, query, where } from '../lib/firebase';
+// Added setDoc to the firebase imports
+import { db, auth, collection, doc, writeBatch, getDocs, query, where, setDoc } from '../lib/firebase';
 import { uploadFieldDocument } from '../lib/storage';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../lib/utils';
@@ -21,12 +22,13 @@ export default function ImportScreen() {
   const [extractionStatus, setExtractionStatus] = useState("Processing...");
   const navigate = useNavigate();
 
-  // --- NEW STATES FOR EDITING & DUPLICATE CHECKING ---
-  const [existingLoanIds, setExistingLoanIds] = useState<Set<string>>(new Set());
+  // --- UPDATED: Track Existing Loans as a Map (LoanID -> BatchInfo) ---
+  const [existingLoansInfo, setExistingLoansInfo] = useState<Map<string, { batchId: string }>>(new Map());
+  
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
 
-  // Fetch existing loan IDs on mount to flag duplicates in real-time
+  // Fetch existing loan IDs and their batch origin on mount
   useEffect(() => {
     const fetchExistingLoans = async () => {
       if (auth.currentUser) {
@@ -36,7 +38,15 @@ export default function ImportScreen() {
             where('assignedAgentId', '==', auth.currentUser.uid)
           );
           const existingDocs = await getDocs(existingQuery);
-          setExistingLoanIds(new Set(existingDocs.docs.map(d => String(d.data().loanId))));
+          
+          const infoMap = new Map();
+          existingDocs.docs.forEach(d => {
+            const data = d.data();
+            infoMap.set(String(data.loanId), { 
+              batchId: data.batchId || 'Legacy/Unknown' 
+            });
+          });
+          setExistingLoansInfo(infoMap);
         } catch (error) {
           console.error("Failed to fetch existing loans", error);
         }
@@ -152,7 +162,6 @@ export default function ImportScreen() {
     }
   };
 
-  // --- NEW EDITING HANDLERS ---
   const handleEditClick = (index: number, item: any) => {
     setEditingIndex(index);
     setEditForm({ ...item });
@@ -174,7 +183,6 @@ export default function ImportScreen() {
   const handleFormChange = (field: string, value: any) => {
     setEditForm((prev: any) => ({ ...prev, [field]: value }));
   };
-  // -----------------------------
 
   const handleImport = async () => {
     if (!auth.currentUser) return setError("Please log in again.");
@@ -189,15 +197,37 @@ export default function ImportScreen() {
         where('assignedAgentId', '==', auth.currentUser.uid)
       );
       const existingDocs = await getDocs(existingQuery);
-      const freshExistingLoanIds = new Set(existingDocs.docs.map(d => String(d.data().loanId)));
+      
+      const freshExistingLoansInfo = new Map();
+      existingDocs.docs.forEach(d => {
+        const data = d.data();
+        freshExistingLoansInfo.set(String(data.loanId), { batchId: data.batchId || 'Legacy/Unknown' });
+      });
 
       // Filter out duplicates (incorporates user edits)
-      const finalDataToImport = extractedData.filter(item => !freshExistingLoanIds.has(String(item.loanId)));
+      const finalDataToImport = extractedData.filter(item => !freshExistingLoansInfo.has(String(item.loanId)));
 
       if (finalDataToImport.length === 0) {
         throw new Error("All items in this list are already in your database (duplicate Loan IDs).");
       }
 
+      // --- AC1: CREATE BATCH METADATA DOCUMENT ---
+      const batchDocRef = doc(collection(db, 'batches'));
+      const batchData = {
+        id: batchDocRef.id,
+        fileName: file?.name || 'Unknown',
+        filePath: extractedData.find(d => d.documentPath)?.documentPath || null,
+        createdAt: new Date().toISOString(),
+        createdBy: auth.currentUser.uid,
+        totalRows: extractedData.length,
+        importedRows: finalDataToImport.length,
+        sourceType: file?.name.split('.').pop()?.toUpperCase() || 'UNKNOWN'
+      };
+
+      // Save the batch doc first
+      await setDoc(batchDocRef, batchData);
+
+      // --- AC2: SAVE CUSTOMERS WITH BATCH ID ---
       const CHUNK_SIZE = 450;
       for (let i = 0; i < finalDataToImport.length; i += CHUNK_SIZE) {
         const batch = writeBatch(db);
@@ -210,6 +240,7 @@ export default function ImportScreen() {
             id: ref.id,
             status: 'Pending',
             assignedAgentId: auth.currentUser?.uid,
+            batchId: batchDocRef.id, // Linking back to the created batch
             createdAt: new Date().toISOString(),
             receivedAmount: 0,
           });
@@ -231,8 +262,8 @@ export default function ImportScreen() {
     ? `Uploading securely... ${uploadProgress}%`
     : extractionStatus;
 
-  // Calculate stats for UI
-  const duplicateCount = extractedData.filter(item => existingLoanIds.has(String(item.loanId))).length;
+  // Calculate stats for UI using Map
+  const duplicateCount = extractedData.filter(item => existingLoansInfo.has(String(item.loanId))).length;
   const validCount = extractedData.length - duplicateCount;
 
   return (
@@ -343,7 +374,10 @@ export default function ImportScreen() {
               {extractedData.map((item, i) => {
                 const isEditing = editingIndex === i;
                 const activeData = isEditing ? editForm : item;
-                const isDuplicate = existingLoanIds.has(String(activeData.loanId));
+                
+                // Fetch duplicate info from the Map instead of a Set
+                const duplicateInfo = existingLoansInfo.get(String(activeData.loanId));
+                const isDuplicate = !!duplicateInfo;
 
                 // --- EDIT MODE VIEW ---
                 if (isEditing) {
@@ -353,7 +387,7 @@ export default function ImportScreen() {
                         <span className="font-bold text-slate-700 text-sm">Edit Record</span>
                         {isDuplicate && (
                           <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-md">
-                            ⚠️ Duplicate Loan ID
+                            ⚠️ Duplicate Loan ID (Batch: {duplicateInfo.batchId.substring(0, 8)}...)
                           </span>
                         )}
                       </div>
@@ -430,8 +464,8 @@ export default function ImportScreen() {
                           </span>
                         )}
                         {isDuplicate && (
-                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
-                            Duplicate (Skipped)
+                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold" title={`From Batch: ${duplicateInfo.batchId}`}>
+                            Duplicate (Batch: {duplicateInfo.batchId.substring(0, 8)}...)
                           </span>
                         )}
                       </div>

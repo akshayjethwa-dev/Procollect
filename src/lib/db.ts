@@ -9,6 +9,7 @@ export interface Customer {
   receivedAmount: number;
   status: 'Pending' | 'Full Payment' | 'Partial Payment' | 'Promise to Pay' | 'Not Reachable' | 'Wrong Address' | 'Refused' | 'Dispute' | 'Customer Shifted' | 'Deceased';
   assignedAgentId: string;
+  batchId?: string; // <-- NEW: Ties customer to their import batch
   bankName?: string;
   pincode?: string;
   emiAmount?: number;
@@ -16,6 +17,18 @@ export interface Customer {
   nextFollowUpDate?: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+// --- NEW BATCH INTERFACE ---
+export interface BatchImport {
+  id: string;
+  fileName: string;
+  filePath: string | null;
+  createdAt: string;
+  createdBy: string;
+  totalRows: number;
+  importedRows: number;
+  sourceType: string;
 }
 
 export interface Visit {

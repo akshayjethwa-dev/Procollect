@@ -1,32 +1,74 @@
 import { useEffect, useState } from 'react';
-import { Search, Filter, Phone, MessageSquare, MapPin, ChevronRight, User } from 'lucide-react';
+import { Search, Filter, Phone, MessageSquare, MapPin, ChevronRight, User, Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { auth, db, collection, query, onSnapshot, where } from '../lib/firebase';
 import { formatCurrency, cn } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
+// --- NEW: Explicitly define the Batch type so TypeScript knows 'createdAt' exists ---
+interface BatchImport {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  importedRows: number;
+  [key: string]: any;
+}
+
 export default function CustomerListScreen() {
   const [customers, setCustomers] = useState<any[]>([]);
+  // Use the explicit interface here
+  const [batches, setBatches] = useState<BatchImport[]>([]); 
+  
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const [selectedBatch, setSelectedBatch] = useState('all');
 
   useEffect(() => {
     if (!db || !auth.currentUser) return;
 
-    const q = query(
+    // 1. Fetch Customers
+    const qCustomers = query(
       collection(db, 'customers'), 
       where('assignedAgentId', '==', auth.currentUser.uid)
     );
     
-    const unsub = onSnapshot(q, (snapshot) => {
+    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'customers');
     });
-    return unsub;
+
+    // 2. Fetch Batches (Import History)
+    const qBatches = query(
+      collection(db, 'batches'),
+      where('createdBy', '==', auth.currentUser.uid)
+    );
+
+    const unsubBatches = onSnapshot(qBatches, (snapshot) => {
+      // Cast the fetched data as BatchImport to satisfy TypeScript
+      const fetchedBatches = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      } as BatchImport));
+      
+      // Sort newest batches first
+      fetchedBatches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setBatches(fetchedBatches);
+    }, (error) => {
+      console.error("Failed to fetch batches:", error);
+    });
+
+    // Cleanup both listeners on unmount
+    return () => {
+      unsubCustomers();
+      unsubBatches();
+    };
   }, []);
 
   const filtered = customers.filter(c => {
+    // Filter by Selected Batch
+    if (selectedBatch !== 'all' && c.batchId !== selectedBatch) return false;
+
     const matchesSearch = c.name?.toLowerCase().includes(search.toLowerCase()) || 
                          c.mobile?.includes(search) || 
                          c.loanId?.toLowerCase().includes(search.toLowerCase());
@@ -48,6 +90,7 @@ export default function CustomerListScreen() {
       <div className="space-y-4">
         <h1 className="text-2xl font-bold tracking-tight">Active Collections</h1>
         
+        {/* Search Bar */}
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
@@ -59,6 +102,29 @@ export default function CustomerListScreen() {
           />
         </div>
 
+        {/* Batch Filter Dropdown (Only shows if batches exist) */}
+        {batches.length > 0 && (
+          <div className="relative">
+            <Layers className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-500" size={18} />
+            <select
+              value={selectedBatch}
+              onChange={(e) => setSelectedBatch(e.target.value)}
+              className="w-full bg-white border-none rounded-2xl p-4 pl-12 pr-10 text-sm shadow-sm focus:ring-2 focus:ring-brand-500 appearance-none font-medium text-slate-700 outline-none cursor-pointer"
+            >
+              <option value="all">All Imported Lists</option>
+              {batches.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.fileName} ({new Date(b.createdAt).toLocaleDateString()}) • {b.importedRows} rows
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <ChevronRight size={16} className="rotate-90" />
+            </div>
+          </div>
+        )}
+
+        {/* Quick Filter Pills */}
         <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
           {['All', 'Due Today', 'High Amount', 'Pending', 'Promise to Pay', 'Partial Payment'].map(f => (
             <button
@@ -66,7 +132,7 @@ export default function CustomerListScreen() {
               onClick={() => setFilter(f)}
               className={cn(
                 "px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all",
-                filter === f ? "bg-brand-600 text-white shadow-md shadow-brand-100" : "bg-white text-slate-500"
+                filter === f ? "bg-brand-600 text-white shadow-md shadow-brand-100" : "bg-white text-slate-500 hover:bg-slate-50"
               )}
             >
               {f}
@@ -89,7 +155,9 @@ export default function CustomerListScreen() {
                 </div>
                 <div>
                   <h4 className="font-bold text-slate-900 leading-tight">{customer.name}</h4>
-                  <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest">{customer.area}</p>
+                  <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest">
+                    {customer.area || 'NO AREA'}
+                  </p>
                 </div>
               </div>
               <div className="text-right">
@@ -104,16 +172,16 @@ export default function CustomerListScreen() {
             </div>
 
             <div className="flex items-center space-x-2 text-slate-400 text-[10px] font-medium mb-4">
-              <MapPin size={10} />
+              <MapPin size={10} className="shrink-0" />
               <span className="truncate">{customer.address}</span>
             </div>
 
             <div className="flex items-center justify-between border-t border-slate-50 pt-4">
-              <div className="flex space-x-3" onClick={(e) => e.stopPropagation() /* Prevent Link trigger on action click */}>
+              <div className="flex space-x-3" onClick={(e) => e.stopPropagation()}>
                 {/* Native dialer anchor */}
                 <a 
                   href={`tel:${customer.mobile}`}
-                  className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center"
+                  className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center hover:bg-brand-100 transition-colors"
                 >
                   <Phone size={18} />
                 </a>
@@ -121,15 +189,15 @@ export default function CustomerListScreen() {
                 <a 
                   href={`https://wa.me/91${customer.mobile}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center"
+                  className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center hover:bg-emerald-100 transition-colors"
                 >
                   <MessageSquare size={18} />
                 </a>
                 {/* Native Google Maps anchor */}
                 <a 
-                  href={`https://maps.google.com/?q=${encodeURIComponent(customer.address)}`}
+                  href={`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(customer.address)}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center"
+                  className="w-10 h-10 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center hover:bg-orange-100 transition-colors"
                 >
                   <MapPin size={18} />
                 </a>
@@ -143,6 +211,9 @@ export default function CustomerListScreen() {
         {filtered.length === 0 && (
           <div className="text-center py-20 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
             <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No customers found</p>
+            {selectedBatch !== 'all' && (
+              <p className="text-slate-400 text-[10px] mt-2">Try selecting a different batch or clearing the search</p>
+            )}
           </div>
         )}
       </div>
