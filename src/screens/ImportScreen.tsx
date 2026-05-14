@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { extractDataFromPDF } from '../services/geminiService';
-// Added setDoc to the firebase imports
+// ✅ FIXED: Imported collectionGroup directly from the official firebase package
+import { collectionGroup } from 'firebase/firestore'; 
 import { db, auth, collection, doc, writeBatch, getDocs, query, where, setDoc } from '../lib/firebase';
 import { uploadFieldDocument } from '../lib/storage';
 import { useNavigate } from 'react-router-dom';
@@ -22,37 +23,46 @@ export default function ImportScreen() {
   const [extractionStatus, setExtractionStatus] = useState("Processing...");
   const navigate = useNavigate();
 
-  // --- UPDATED: Track Existing Loans as a Map (LoanID -> BatchInfo) ---
   const [existingLoansInfo, setExistingLoansInfo] = useState<Map<string, { batchId: string }>>(new Map());
   
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
 
-  // Fetch existing loan IDs and their batch origin on mount
   useEffect(() => {
-    const fetchExistingLoans = async () => {
+    const fetchExistingData = async () => {
       if (auth.currentUser) {
         try {
-          const existingQuery = query(
-            collection(db, 'customers'),
-            where('assignedAgentId', '==', auth.currentUser.uid)
-          );
-          const existingDocs = await getDocs(existingQuery);
-          
           const infoMap = new Map();
-          existingDocs.docs.forEach(d => {
-            const data = d.data();
-            infoMap.set(String(data.loanId), { 
-              batchId: data.batchId || 'Legacy/Unknown' 
-            });
+
+          // 1. Fetch Legacy loans (stored directly on customers)
+          const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
+          const existingCustDocs = await getDocs(existingCustQuery);
+          existingCustDocs.docs.forEach(d => {
+            // ✅ FIXED: Cast as 'any' to resolve 'unknown' TS error
+            const data = d.data() as any; 
+            if (data.loanId) infoMap.set(String(data.loanId), { batchId: data.batchId || 'Legacy' });
           });
+
+          // 2. Fetch New subcollection loans using collectionGroup
+          try {
+            const existingLoansQuery = query(collectionGroup(db, 'loans'), where('assignedAgentId', '==', auth.currentUser.uid));
+            const existingLoansDocs = await getDocs(existingLoansQuery);
+            existingLoansDocs.docs.forEach(d => {
+              // ✅ FIXED: Cast as 'any' to resolve 'unknown' TS error
+              const data = d.data() as any;
+              infoMap.set(String(data.loanId), { batchId: data.batchId || 'Legacy' });
+            });
+          } catch (e) {
+            console.warn("CollectionGroup query failed. You may need to create an index in Firebase Console.", e);
+          }
+
           setExistingLoansInfo(infoMap);
         } catch (error) {
           console.error("Failed to fetch existing loans", error);
         }
       }
     };
-    fetchExistingLoans();
+    fetchExistingData();
   }, []);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -191,21 +201,19 @@ export default function ImportScreen() {
     setError(null);
 
     try {
-      // Re-fetch right before saving just to be perfectly accurate
-      const existingQuery = query(
-        collection(db, 'customers'),
-        where('assignedAgentId', '==', auth.currentUser.uid)
-      );
-      const existingDocs = await getDocs(existingQuery);
+      // Re-fetch existing customers to map by Mobile Number
+      const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
+      const existingCustDocs = await getDocs(existingCustQuery);
       
-      const freshExistingLoansInfo = new Map();
-      existingDocs.docs.forEach(d => {
-        const data = d.data();
-        freshExistingLoansInfo.set(String(data.loanId), { batchId: data.batchId || 'Legacy/Unknown' });
+      const customersByMobile = new Map();
+      existingCustDocs.docs.forEach(d => {
+        // ✅ FIXED: Cast as 'any' to resolve 'unknown' TS error
+        const data = d.data() as any;
+        customersByMobile.set(String(data.mobile), { id: d.id, ...data });
       });
 
-      // Filter out duplicates (incorporates user edits)
-      const finalDataToImport = extractedData.filter(item => !freshExistingLoansInfo.has(String(item.loanId)));
+      // Filter out duplicate loan IDs based on the Map we built on mount
+      const finalDataToImport = extractedData.filter(item => !existingLoansInfo.has(String(item.loanId)));
 
       if (finalDataToImport.length === 0) {
         throw new Error("All items in this list are already in your database (duplicate Loan IDs).");
@@ -224,28 +232,78 @@ export default function ImportScreen() {
         sourceType: file?.name.split('.').pop()?.toUpperCase() || 'UNKNOWN'
       };
 
-      // Save the batch doc first
       await setDoc(batchDocRef, batchData);
 
-      // --- AC2: SAVE CUSTOMERS WITH BATCH ID ---
-      const CHUNK_SIZE = 450;
-      for (let i = 0; i < finalDataToImport.length; i += CHUNK_SIZE) {
-        const batch = writeBatch(db);
-        const currentChunk = finalDataToImport.slice(i, i + CHUNK_SIZE);
+      // --- AC2: GROUP BY MOBILE AND SAVE LOANS TO SUBCOLLECTION ---
+      const groupedByMobile = new Map<string, any[]>();
+      finalDataToImport.forEach(item => {
+        const m = String(item.mobile);
+        if (!groupedByMobile.has(m)) groupedByMobile.set(m, []);
+        groupedByMobile.get(m)?.push(item);
+      });
 
-        currentChunk.forEach(item => {
-          const ref = doc(collection(db, 'customers'));
-          batch.set(ref, {
-            ...item,
-            id: ref.id,
+      let batch = writeBatch(db);
+      let operationCount = 0;
+
+      for (const [mobile, loans] of Array.from(groupedByMobile.entries())) {
+        let customerDocRef;
+        let totalAdditionalDue = loans.reduce((sum, l) => sum + (Number(l.dueAmount) || 0), 0);
+        
+        if (customersByMobile.has(mobile)) {
+          // Existing Customer: Update their aggregated total
+          const existingCust = customersByMobile.get(mobile);
+          customerDocRef = doc(db, 'customers', existingCust.id);
+          batch.update(customerDocRef, {
+            totalDueAmount: (existingCust.totalDueAmount || existingCust.dueAmount || 0) + totalAdditionalDue
+          });
+          operationCount++;
+        } else {
+          // New Customer
+          customerDocRef = doc(collection(db, 'customers'));
+          const firstItem = loans[0];
+          batch.set(customerDocRef, {
+            id: customerDocRef.id,
+            name: firstItem.name,
+            mobile: firstItem.mobile,
+            address: firstItem.address,
+            totalDueAmount: totalAdditionalDue,
+            totalReceivedAmount: 0,
             status: 'Pending',
             assignedAgentId: auth.currentUser?.uid,
-            batchId: batchDocRef.id, // Linking back to the created batch
+            batchId: batchDocRef.id,
             createdAt: new Date().toISOString(),
-            receivedAmount: 0,
           });
-        });
+          operationCount++;
+        }
 
+        // Add each loan as a subcollection document
+        for (const loanItem of loans) {
+          const loanDocRef = doc(collection(db, 'customers', customerDocRef.id, 'loans'));
+          batch.set(loanDocRef, {
+            id: loanDocRef.id,
+            customerId: customerDocRef.id,
+            loanId: loanItem.loanId,
+            dueAmount: Number(loanItem.dueAmount) || 0,
+            dueDate: loanItem.dueDate,
+            receivedAmount: 0,
+            status: 'Pending',
+            assignedAgentId: auth.currentUser?.uid,
+            batchId: batchDocRef.id,
+            createdAt: new Date().toISOString()
+          });
+          operationCount++;
+
+          // Commit chunk if we reach Firebase batch limits
+          if (operationCount > 450) {
+            await batch.commit();
+            batch = writeBatch(db);
+            operationCount = 0;
+          }
+        }
+      }
+
+      // Commit any remaining operations
+      if (operationCount > 0) {
         await batch.commit();
       }
 

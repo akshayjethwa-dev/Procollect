@@ -33,7 +33,7 @@ export default function CustomerListScreen() {
     );
     
     const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'customers');
     });
@@ -48,7 +48,7 @@ export default function CustomerListScreen() {
       // Cast the fetched data as BatchImport to satisfy TypeScript
       const fetchedBatches = snapshot.docs.map(doc => ({ 
         id: doc.id, 
-        ...doc.data() 
+        ...(doc.data() as any)
       } as BatchImport));
       
       // Sort newest batches first
@@ -75,12 +75,15 @@ export default function CustomerListScreen() {
     
     if (!matchesSearch) return false;
 
+    // Determine the due amount (use aggregate if available, fallback to legacy)
+    const dueAmt = c.totalDueAmount !== undefined ? c.totalDueAmount : (c.dueAmount || 0);
+
     if (filter === 'All') return true;
     if (filter === 'Due Today') {
       const today = new Date().toISOString().split('T')[0];
       return c.dueDate === today;
     }
-    if (filter === 'High Amount') return (c.dueAmount || 0) > 20000;
+    if (filter === 'High Amount') return dueAmt > 20000;
     
     return c.status === filter;
   });
@@ -142,72 +145,74 @@ export default function CustomerListScreen() {
       </div>
 
       <div className="space-y-4">
-        {filtered.map((customer) => (
-          <Link 
-            to={`/customers/${customer.id}`} 
-            key={customer.id} 
-            className="premium-card p-4 block active:scale-[0.98] transition-transform"
-          >
-            <div className="flex justify-between items-start mb-3">
-              <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
-                  <User size={24} />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 leading-tight">{customer.name}</h4>
-                  <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest">
-                    {customer.area || 'NO AREA'}
-                  </p>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="font-black text-slate-900">{formatCurrency(customer.dueAmount)}</div>
-                <div className={cn(
-                  "text-[10px] font-bold uppercase",
-                  customer.status === 'Pending' ? "text-orange-600" : "text-emerald-600"
-                )}>
-                  {customer.status}
-                </div>
-              </div>
-            </div>
+        {filtered.map((customer) => {
+          // Calculate display due amount for each customer
+          const displayDue = customer.totalDueAmount !== undefined ? customer.totalDueAmount : (customer.dueAmount || 0);
 
-            <div className="flex items-center space-x-2 text-slate-400 text-[10px] font-medium mb-4">
-              <MapPin size={10} className="shrink-0" />
-              <span className="truncate">{customer.address}</span>
-            </div>
+          return (
+            <Link 
+              to={`/customers/${customer.id}`} 
+              key={customer.id} 
+              className="premium-card p-4 block active:scale-[0.98] transition-transform"
+            >
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+                    <User size={24} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 leading-tight">{customer.name}</h4>
+                    <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest">
+                      {customer.mobile}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-black text-slate-900">{formatCurrency(displayDue)}</div>
+                  <div className={cn(
+                    "text-[10px] font-bold uppercase",
+                    customer.status === 'Pending' ? "text-orange-600" : "text-emerald-600"
+                  )}>
+                    {customer.status}
+                  </div>
+                </div>
+              </div>
 
-            <div className="flex items-center justify-between border-t border-slate-50 pt-4">
-              <div className="flex space-x-3" onClick={(e) => e.stopPropagation()}>
-                {/* Native dialer anchor */}
-                <a 
-                  href={`tel:${customer.mobile}`}
-                  className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center hover:bg-brand-100 transition-colors"
-                >
-                  <Phone size={18} />
-                </a>
-                {/* Native WhatsApp anchor */}
-                <a 
-                  href={`https://wa.me/91${customer.mobile}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center hover:bg-emerald-100 transition-colors"
-                >
-                  <MessageSquare size={18} />
-                </a>
-                {/* Native Google Maps anchor */}
-                <a 
-                  href={`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(customer.address)}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="w-10 h-10 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center hover:bg-orange-100 transition-colors"
-                >
-                  <MapPin size={18} />
-                </a>
+              <div className="flex items-center space-x-2 text-slate-400 text-[10px] font-medium mb-4">
+                <MapPin size={10} className="shrink-0" />
+                <span className="truncate">{customer.address}</span>
               </div>
-              <div className="text-slate-300">
-                <ChevronRight size={20} />
+
+              <div className="flex items-center justify-between border-t border-slate-50 pt-4">
+                <div className="flex space-x-3" onClick={(e) => e.stopPropagation()}>
+                  <a 
+                    href={`tel:${customer.mobile}`}
+                    className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center hover:bg-brand-100 transition-colors"
+                  >
+                    <Phone size={18} />
+                  </a>
+                  <a 
+                    href={`https://wa.me/91${customer.mobile}`}
+                    target="_blank" rel="noopener noreferrer"
+                    className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center hover:bg-emerald-100 transition-colors"
+                  >
+                    <MessageSquare size={18} />
+                  </a>
+                  <a 
+                    href={`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(customer.address)}`}
+                    target="_blank" rel="noopener noreferrer"
+                    className="w-10 h-10 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center hover:bg-orange-100 transition-colors"
+                  >
+                    <MapPin size={18} />
+                  </a>
+                </div>
+                <div className="text-slate-300">
+                  <ChevronRight size={20} />
+                </div>
               </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          );
+        })}
         {filtered.length === 0 && (
           <div className="text-center py-20 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
             <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No customers found</p>

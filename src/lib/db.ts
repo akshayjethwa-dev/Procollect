@@ -5,21 +5,35 @@ export interface Customer {
   name: string;
   mobile: string;
   address: string;
-  dueAmount: number;
-  receivedAmount: number;
-  status: 'Pending' | 'Full Payment' | 'Partial Payment' | 'Promise to Pay' | 'Not Reachable' | 'Wrong Address' | 'Refused' | 'Dispute' | 'Customer Shifted' | 'Deceased';
+  totalDueAmount: number; // <-- AGGREGATED: Sum of all active loans
+  totalReceivedAmount: number; // <-- AGGREGATED
+  status: string; // Master status
   assignedAgentId: string;
-  batchId?: string; // <-- NEW: Ties customer to their import batch
-  bankName?: string;
-  pincode?: string;
-  emiAmount?: number;
   lastVisitDate?: string;
   nextFollowUpDate?: string;
   createdAt: string;
   updatedAt?: string;
+  // Legacy fields kept for backward compatibility during transition
+  dueAmount?: number; 
+  loanId?: string;
 }
 
-// --- NEW BATCH INTERFACE ---
+// --- NEW LOAN INTERFACE ---
+export interface Loan {
+  id: string;
+  customerId: string; // Reference to parent
+  loanId: string;
+  dueAmount: number;
+  receivedAmount: number;
+  dueDate: string;
+  emiAmount?: number;
+  status: string;
+  assignedAgentId: string;
+  batchId?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface BatchImport {
   id: string;
   fileName: string;
@@ -70,6 +84,7 @@ export interface UserProfile {
 
 export class ProCollectDatabase extends Dexie {
   customers!: Table<Customer>;
+  loans!: Table<Loan>; // Dexie tracking for offline loans
   visits!: Table<Visit>;
   followups!: Table<FollowUp>;
   notifications!: Table<Notification>;
@@ -77,8 +92,9 @@ export class ProCollectDatabase extends Dexie {
 
   constructor() {
     super('ProCollectDB');
-    this.version(1).stores({
+    this.version(2).stores({
       customers: 'id, assignedAgentId, status, mobile',
+      loans: 'id, customerId, loanId, assignedAgentId',
       visits: 'id, customerId, agentId, date',
       followups: 'id, customerId, agentId, scheduledAt, status',
       notifications: 'id, agentId, sentAt, read',
