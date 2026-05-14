@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper for authentication
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Match files in the visit-photos directory
+    match /visit-photos/{agentId}/{allPaths=**} {
+      // Agents can only access their own directory
+      allow read, write: if isAuthenticated() 
+        && request.auth.uid == agentId
+        && request.auth.token.isSubscribed == true;
+    }
+  }
+}

@@ -7,7 +7,8 @@ import {
   GoogleAuthProvider, 
   signOut,
   onAuthStateChanged,
-  User
+  User,
+  getIdTokenResult
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -33,8 +34,13 @@ import {
   arrayUnion,
   arrayRemove
 } from 'firebase/firestore';
+import { 
+  getStorage, 
+  ref as storageRef, 
+  uploadBytesResumable, 
+  getDownloadURL 
+} from 'firebase/storage'; // Added for User Story 2.1
 
-// Read production config from environment variables
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -48,6 +54,18 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app); // Initialize Storage
+
+/**
+ * Helper to check if the current user has the 'isSubscribed' custom claim.
+ */
+export const checkSubscriptionStatus = async (): Promise<boolean> => {
+  const user = auth.currentUser;
+  if (!user) return false;
+  
+  const tokenResult = await getIdTokenResult(user, true);
+  return !!tokenResult.claims.isSubscribed;
+};
 
 export {
   signInWithPopup,
@@ -74,7 +92,10 @@ export {
   serverTimestamp,
   increment,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  storageRef, // Exported for use in storage.ts
+  uploadBytesResumable,
+  getDownloadURL
 };
 
 export type { User };

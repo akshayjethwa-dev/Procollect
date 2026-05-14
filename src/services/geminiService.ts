@@ -1,11 +1,14 @@
-export async function extractDataFromPDF(fileBase64: string, mimeType: string) {
-  // Create an AbortController to handle timeouts
+/**
+ * Extracts customer data from a document using the Gemini AI pipeline.
+ * @param fileBase64 The base64 encoded file content.
+ * @param mimeType The file's MIME type (e.g., 'application/pdf', 'image/jpeg').
+ * @param fileUrl Optional Firebase Storage URL for the uploaded document.
+ */
+export async function extractDataFromPDF(fileBase64: string, mimeType: string, fileUrl?: string) {
   const controller = new AbortController();
-  // Set a 60-second timeout threshold
   const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
-    // Make a POST request to our secure backend endpoint
     const response = await fetch('/api/extract', {
       method: 'POST',
       headers: {
@@ -13,15 +16,14 @@ export async function extractDataFromPDF(fileBase64: string, mimeType: string) {
       },
       body: JSON.stringify({
         fileBase64,
-        mimeType
+        mimeType,
+        fileUrl // Include the storage URL to link the record to the source file
       }),
-      signal: controller.signal // Attach the abort signal
+      signal: controller.signal
     });
 
-    // Clear the timeout if the request finishes successfully
     clearTimeout(timeoutId);
 
-    // Handle specific HTTP errors gracefully
     if (response.status === 413) {
       throw new Error("The file is too large to process. Please upload a smaller document.");
     }
@@ -37,13 +39,11 @@ export async function extractDataFromPDF(fileBase64: string, mimeType: string) {
   } catch (e: any) {
     clearTimeout(timeoutId);
     
-    // Catch the specific timeout error thrown by AbortController
     if (e.name === 'AbortError') {
-      throw new Error("Extraction timed out. The document might be too large or complex. Please try breaking it into smaller files.");
+      throw new Error("Extraction timed out. The document might be too large or complex.");
     }
     
     console.error("Frontend extraction error:", e);
-    // Rethrow to allow the UI to handle it (e.g., show error message in ImportScreen)
-    throw new Error(e.message || "Failed to connect to the extraction service. Please check your connection.");
+    throw new Error(e.message || "Failed to connect to the extraction service.");
   }
 }

@@ -23,13 +23,13 @@ async function startServer() {
   // --- SECURE AI ENDPOINT ---
   app.post('/api/extract', async (req, res) => {
     try {
-      const { fileBase64, mimeType } = req.body;
+      // Added fileUrl to destructuring to support the new storage pipeline
+      const { fileBase64, mimeType, fileUrl } = req.body;
 
-      if (!fileBase64 || !mimeType) {
-        return res.status(400).json({ error: "fileBase64 and mimeType are required" });
+      if (!fileBase64 && !fileUrl) {
+        return res.status(400).json({ error: "fileBase64 or fileUrl is required" });
       }
 
-      // Using the more stable and cost-effective production model
       const model = "gemini-1.5-flash"; 
       
       const prompt = `
@@ -43,15 +43,21 @@ async function startServer() {
         2. Extract the following fields for each customer:
            - name: Full name of the customer
            - mobile: Mobile or phone number
-           - address: Full combined address (include area/pincode if available)
+           - address: Full combined address
            - dueAmount: Total amount due (as a number)
-           - dueDate: Next due date or installment date (format: YYYY-MM-DD or reasonable guess)
+           - dueDate: Next due date (format: YYYY-MM-DD or reasonable guess)
            - loanId: Loan ID, Account Number, or Reference ID
-           - area: Specific locality or district mentioned
+           - area: Specific locality or district
+           - needsReview: Boolean flag
         
-        3. If data is in a table, extract every row.
-        4. If data is partial, extract as much as possible but do not invent data.
-        5. Ensure the "dueAmount" is a valid number, not a string with currency symbols.
+        3. QUALITY CONTROL: 
+           Set "needsReview": true if:
+           - The image is blurry or hard to read.
+           - The text appears to be handwritten and is ambiguous.
+           - Required fields like Name, LoanId, or Amount are missing and you had to guess.
+           Otherwise, set it to false.
+        
+        4. Ensure "dueAmount" is a valid number, not a string with currency symbols.
         
         Return the result strictly as a JSON array of objects.
       `;
@@ -83,8 +89,9 @@ async function startServer() {
                 dueDate: { type: Type.STRING },
                 loanId: { type: Type.STRING },
                 area: { type: Type.STRING },
+                needsReview: { type: Type.BOOLEAN } // Added to schema
               },
-              required: ["name", "dueAmount"]
+              required: ["name", "dueAmount", "needsReview"]
             }
           }
         }
@@ -93,7 +100,15 @@ async function startServer() {
       const text = response.text;
       if (!text) return res.json([]);
       
-      return res.json(JSON.parse(text));
+      const parsedData = JSON.parse(text);
+
+      // Link the source document URL to each record if provided
+      const finalData = parsedData.map((item: any) => ({
+        ...item,
+        documentUrl: fileUrl || null
+      }));
+      
+      return res.json(finalData);
       
     } catch (error) {
       console.error("Backend Gemini extraction error:", error);
@@ -106,7 +121,6 @@ async function startServer() {
   console.log(`[Server] Starting. Production: ${isProd}`);
 
   if (!isProd) {
-    // Development mode with Vite
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -114,21 +128,11 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Production mode serving static files from dist
     const distPath = path.join(process.cwd(), "dist");
-    console.log(`[Prod] Serving from: ${distPath}`);
-    
     app.use(express.static(distPath));
-    
-    // SPA Fallback
     app.get("*", (req, res) => {
       const indexPath = path.join(distPath, "index.html");
-      res.sendFile(indexPath, (err) => {
-        if (err) {
-          console.error(`[Error] 404 on ${req.url}. index.html not found at ${indexPath}`);
-          res.status(404).send("Application not initialized. Please try again soon.");
-        }
-      });
+      res.sendFile(indexPath);
     });
   }
 
