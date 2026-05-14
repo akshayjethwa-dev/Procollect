@@ -1,0 +1,9 @@
+{
+  "name": "ProCollect",
+  "description": "Smart Collection Management app for loan recovery agents and field executives.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}

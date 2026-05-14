@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Agent profile data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["agent", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer record from PDF",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "address": { "type": "string" },
+        "dueAmount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date" },
+        "loanId": { "type": "string" },
+        "area": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "contacted", "collected", "promised", "failed"] },
+        "assignedTo": { "type": "string" },
+        "lastActionDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "dueAmount"]
+    },
+    "Interaction": {
+      "title": "Interaction",
+      "description": "Collection activity or comment",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "agentId": { "type": "string" },
+        "type": { "type": "string", "enum": ["payment", "visit", "call", "sms", "whatsapp", "promise"] },
+        "amount": { "type": "number" },
+        "notes": { "type": "string" },
+        "proofUrl": { "type": "string" },
+        "scheduledAt": { "type": "string", "format": "date-time" },
+        "completed": { "type": "boolean" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "agentId", "type", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app alerts",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "read": { "type": "boolean" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "link": { "type": "string" }
+      },
+      "required": ["recipientId", "title", "message", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Agent profiles"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "List of borrowers"
+    },
+    "/interactions/{interactionId}": {
+      "schema": "Interaction",
+      "description": "Payment and visit history"
+    },
+    "/followups/{followupId}": {
+      "schema": "Interaction",
+      "description": "Scheduled follow-up tasks"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Alerts for agents"
+    }
+  }
+}
