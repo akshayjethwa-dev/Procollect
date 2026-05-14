@@ -1,72 +1,49 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 export async function extractDataFromPDF(fileBase64: string, mimeType: string) {
-  const model = "gemini-3-flash-preview";
-  
-  const prompt = `
-    TASK: Extract EVERY SINGLE customer record from the provided document.
-    
-    IMPORTANT INSTRUCTIONS:
-    1. Do not skip ANY records. Process all pages thoroughly.
-    2. Extract the following fields for each customer:
-       - name: Full name of the customer
-       - mobile: Mobile or phone number
-       - address: Full combined address (include area/pincode if available)
-       - dueAmount: Total amount due (as a number)
-       - dueDate: Next due date or installment date (format: YYYY-MM-DD or reasonable guess)
-       - loanId: Loan ID, Account Number, or Reference ID
-       - area: Specific locality or district mentioned
-    
-    3. If data is in a table, extract every row.
-    4. If data is partial, extract as much as possible but do not invent data.
-    5. Ensure the "dueAmount" is a valid number, not a string with currency symbols.
-    
-    Return the result strictly as a JSON array of objects.
-  `;
+  // Create an AbortController to handle timeouts
+  const controller = new AbortController();
+  // Set a 60-second timeout threshold
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              data: fileBase64,
-              mimeType: mimeType,
-            },
-          },
-          { text: prompt },
-        ],
+    // Make a POST request to our secure backend endpoint
+    const response = await fetch('/api/extract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              mobile: { type: Type.STRING },
-              address: { type: Type.STRING },
-              dueAmount: { type: Type.NUMBER },
-              dueDate: { type: Type.STRING },
-              loanId: { type: Type.STRING },
-              area: { type: Type.STRING },
-            },
-            required: ["name", "dueAmount"]
-          }
-        }
-      }
+      body: JSON.stringify({
+        fileBase64,
+        mimeType
+      }),
+      signal: controller.signal // Attach the abort signal
     });
 
-    const text = response.text;
-    if (!text) return [];
+    // Clear the timeout if the request finishes successfully
+    clearTimeout(timeoutId);
+
+    // Handle specific HTTP errors gracefully
+    if (response.status === 413) {
+      throw new Error("The file is too large to process. Please upload a smaller document.");
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server responded with an error (${response.status}).`);
+    }
+
+    const data = await response.json();
+    return data;
     
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("Gemini extraction error:", e);
-    return [];
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+    
+    // Catch the specific timeout error thrown by AbortController
+    if (e.name === 'AbortError') {
+      throw new Error("Extraction timed out. The document might be too large or complex. Please try breaking it into smaller files.");
+    }
+    
+    console.error("Frontend extraction error:", e);
+    // Rethrow to allow the UI to handle it (e.g., show error message in ImportScreen)
+    throw new Error(e.message || "Failed to connect to the extraction service. Please check your connection.");
   }
 }

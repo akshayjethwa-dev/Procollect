@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FileUp, FileText, CheckCircle2, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { FileUp, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { motion } from 'motion/react';
 import { extractDataFromPDF } from '../services/geminiService';
 import { db, auth, collection, doc, writeBatch } from '../lib/firebase';
 import { useNavigate } from 'react-router-dom';
@@ -36,6 +36,14 @@ export default function ImportScreen() {
     setExtracting(true);
     setError(null);
     
+    // Preliminary file size check (10MB limit)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      setError("File exceeds the 10MB limit. Please upload a smaller file.");
+      setExtracting(false);
+      return;
+    }
+    
     try {
       const reader = new FileReader();
       
@@ -45,20 +53,22 @@ export default function ImportScreen() {
           const base64 = result.split(',')[1];
           resolve(base64);
         };
-        reader.onerror = reject;
+        reader.onerror = () => reject(new Error("Failed to read the file from your device."));
         reader.readAsDataURL(file);
       });
 
       const data = await extractDataFromPDF(fileData, file.type);
       
-      if (!data || data.length === 0) {
-        throw new Error("No data could be extracted from this file. Please ensure it's a clear document.");
+      // Explicitly handle the empty array scenario (e.g., user uploaded a cat photo or blank document)
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        throw new Error("No customer or debt collection data was found in this document. Please ensure you uploaded a valid collection list.");
       }
       
       setExtractedData(data);
     } catch (e: any) {
       console.error("Extraction failed:", e);
-      setError(e.message || "Failed to extract data. Please try again.");
+      setError(e.message || "An unexpected error occurred while extracting data. Please try again.");
+      setExtractedData([]); // Ensure data is cleared on error
     } finally {
       setExtracting(false);
     }
@@ -76,46 +86,55 @@ export default function ImportScreen() {
     }
 
     setLoading(true);
+    setError(null);
     console.log(`Starting import of ${dataToImport.length} items for agent ${auth.currentUser.uid}`);
+    
     try {
-      const batch = writeBatch(db);
-      dataToImport.forEach(item => {
-        const ref = doc(collection(db, 'customers'));
-        const customerData = {
-          ...item,
-          id: ref.id,
-          status: 'Pending',
-          assignedAgentId: auth.currentUser?.uid,
-          createdAt: new Date().toISOString(),
-          receivedAmount: 0 // Initialize to 0
-        };
-        batch.set(ref, customerData);
-      });
-      await batch.commit();
-      console.log("Batch commit successful");
+      // ---------------------------------------------------------
+      // BATCH CHUNKING LOGIC: Firestore limit is 500 per batch.
+      // We chunk into arrays of 450 to be safe.
+      // ---------------------------------------------------------
+      const CHUNK_SIZE = 450;
+      const chunks = [];
+      
+      for (let i = 0; i < dataToImport.length; i += CHUNK_SIZE) {
+        chunks.push(dataToImport.slice(i, i + CHUNK_SIZE));
+      }
+
+      // Process chunks sequentially to avoid overwhelming the network
+      for (let i = 0; i < chunks.length; i++) {
+        const batch = writeBatch(db);
+        const currentChunk = chunks[i];
+        
+        currentChunk.forEach(item => {
+          const ref = doc(collection(db, 'customers'));
+          const customerData = {
+            ...item,
+            id: ref.id,
+            status: 'Pending',
+            // This is strictly enforced by our new firestore.rules
+            assignedAgentId: auth.currentUser?.uid, 
+            createdAt: new Date().toISOString(),
+            receivedAmount: 0
+          };
+          batch.set(ref, customerData);
+        });
+        
+        await batch.commit();
+        console.log(`Batch ${i + 1} of ${chunks.length} committed successfully.`);
+      }
+
+      // Redirect to customers view on complete success
       navigate('/customers');
+      
     } catch (e: any) {
       console.error("Batch commit failed", e);
       handleFirestoreError(e, OperationType.WRITE, 'customers');
+      // Set a generic UI error so the agent knows something went wrong
+      setError("An error occurred while saving to the database. Please try again.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadSampleData = () => {
-    const sampleData = [
-      { name: "Rajesh Patel", mobile: "9876543210", address: "Nikol Road, Ahmedabad", dueAmount: 18500, dueDate: "2026-05-15", loanId: "LN1001", area: "Nikol" },
-      { name: "Amit Shah", mobile: "9898989898", address: "Maninagar, Ahmedabad", dueAmount: 9200, dueDate: "2026-05-14", loanId: "LN1002", area: "Maninagar" },
-      { name: "Pooja Mehta", mobile: "9811112233", address: "Satellite, Ahmedabad", dueAmount: 25000, dueDate: "2026-05-16", loanId: "LN1003", area: "Satellite" },
-      { name: "Kiran Desai", mobile: "9822233344", address: "Naranpura, Ahmedabad", dueAmount: 6700, dueDate: "2026-05-14", loanId: "LN1004", area: "Naranpura" },
-      { name: "Sanjay Kumar", mobile: "9833344455", address: "Bopal, Ahmedabad", dueAmount: 31000, dueDate: "2026-05-17", loanId: "LN1005", area: "Bopal" },
-      { name: "Neha Joshi", mobile: "9844455566", address: "Gota, Ahmedabad", dueAmount: 14500, dueDate: "2026-05-15", loanId: "LN1006", area: "Gota" },
-      { name: "Rakesh Singh", mobile: "9855566677", address: "Chandkheda, Ahmedabad", dueAmount: 5600, dueDate: "2026-05-13", loanId: "LN1007", area: "Chandkheda" },
-      { name: "Vikas Yadav", mobile: "9866677788", address: "CG Road, Ahmedabad", dueAmount: 42000, dueDate: "2026-05-18", loanId: "LN1008", area: "CG Road" },
-      { name: "Anjali Verma", mobile: "9877788899", address: "Thaltej, Ahmedabad", dueAmount: 7800, dueDate: "2026-05-14", loanId: "LN1009", area: "Thaltej" },
-      { name: "Deepak Jain", mobile: "9888899900", address: "Iskon, Ahmedabad", dueAmount: 12000, dueDate: "2026-05-15", loanId: "LN1010", area: "Iskon" }
-    ];
-    handleImport(sampleData);
   };
 
   return (
@@ -155,15 +174,6 @@ export default function ImportScreen() {
               ) : (
                 <span>Process with ProCollect AI</span>
               )}
-            </button>
-            
-            <button
-              onClick={loadSampleData}
-              disabled={loading}
-              className="w-full bg-slate-100 text-slate-600 p-5 rounded-2xl font-bold flex items-center justify-center gap-2 border border-slate-200"
-            >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
-              Import Provided PDF Data
             </button>
           </div>
         </div>
