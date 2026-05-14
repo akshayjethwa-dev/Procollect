@@ -1,91 +1,9 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
     match /{document=**} {
       allow read, write: if false;
-    }
-
-    // 3. Helpers
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    // --- Entity Validations ---
-
-    function isValidUser(data) {
-      return data.uid == request.auth.uid 
-        && data.email is string 
-        && data.email.size() <= 256;
-    }
-
-    function isValidCustomer(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() <= 256
-        && data.dueAmount is number && data.dueAmount >= 0;
-    }
-
-    function isValidInteraction(data) {
-      return data.customerId is string && isValidId(data.customerId)
-        && data.agentId == request.auth.uid
-        && data.type in ['payment', 'visit', 'call', 'sms', 'whatsapp', 'promise']
-        && data.timestamp is timestamp;
-    }
-
-    // --- Match Blocks ---
-
-    match /users/{userId} {
-      allow get: if isSignedIn();
-      allow list: if false; // Agents shouldn't list each other for now
-      allow create, update: if isOwner(userId) && isValidUser(incoming());
-    }
-
-    match /customers/{customerId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidCustomer(incoming());
-      allow update: if isSignedIn() && isValidCustomer(incoming()) && (
-        // Action: Update status
-        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'lastActionDate']) ||
-        // Action: Update details (if they own the record or for the pilot, any agent)
-        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'mobile', 'address', 'dueAmount', 'dueDate', 'loanId', 'area', 'status', 'lastActionDate', 'assignedTo'])
-      );
-      allow delete: if false; // No deletion for audit trail
-    }
-
-    match /interactions/{interactionId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidInteraction(incoming());
-      allow update, delete: if false; // Interactions are immutable records
-    }
-
-    match /followups/{followupId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidInteraction(incoming());
-      allow update: if isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'notes', 'timestamp']);
-      allow delete: if isSignedIn();
-    }
-
-    match /notifications/{notificationId} {
-      allow read: if isSignedIn() && resource.data.recipientId == request.auth.uid;
-      allow create: if isSignedIn(); // Allow agents to send notifications (e.g. to admins or triggered)
-      allow update: if isSignedIn() && resource.data.recipientId == request.auth.uid 
-        && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
-      allow delete: if isSignedIn() && resource.data.recipientId == request.auth.uid;
     }
   }
 }
