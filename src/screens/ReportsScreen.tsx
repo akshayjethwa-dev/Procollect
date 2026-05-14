@@ -1,104 +1,301 @@
 import { useEffect, useState, ReactNode } from 'react';
-import { BarChart3, TrendingUp, PieChart, Download, Calendar } from 'lucide-react';
+import { BarChart3, TrendingUp, PieChart, Download, Calendar, MapPin, MessageSquare, Clock } from 'lucide-react';
 import { auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, cn } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { format, subDays, startOfMonth, isAfter } from 'date-fns';
 
 export default function ReportsScreen() {
-  const [stats, setStats] = useState({
-    totalRecovery: 0,
-    visitCount: 0,
-    efficiency: 0,
-    trendData: [0, 0, 0, 0, 0, 0, 0]
-  });
+  const [interactions, setInteractions] = useState<any[]>([]);
+  const [timeframe, setTimeframe] = useState<'week' | 'month' | 'all'>('week');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!auth.currentUser) return;
 
+    // Fetch all interactions for this agent
     const q = query(collection(db, 'interactions'), where('agentId', '==', auth.currentUser.uid));
+    
     const unsub = onSnapshot(q, (snap) => {
-      const docs = snap.docs.map(d => d.data());
-      
-      const totalRecovery = docs.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
-      const visitCount = docs.length;
-      
-      // Calculate efficiency (e.g. % of interactions that resulted in payment)
-      const payments = docs.filter(d => d.type === 'payment').length;
-      const efficiency = visitCount > 0 ? Math.round((payments / visitCount) * 100) : 0;
-
-      setStats({
-        totalRecovery,
-        visitCount,
-        efficiency,
-        trendData: [40, 70, 45, 90, 65, 80, 55] // Keep some mock for trend for now or just 0s
+      const docs = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          // Safely convert Firestore timestamp to JS Date
+          dateObj: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(),
+        };
       });
+      
+      // Sort interactions newest first
+      docs.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
+      
+      setInteractions(docs);
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'interactions_reports');
     });
 
     return unsub;
-  }, [auth.currentUser]);
+  }, []);
+
+  // 1. Filter data based on selected timeframe
+  const filteredInteractions = interactions.filter(i => {
+    if (timeframe === 'all') return true;
+    const now = new Date();
+    if (timeframe === 'week') return isAfter(i.dateObj, subDays(now, 7));
+    if (timeframe === 'month') return isAfter(i.dateObj, startOfMonth(now));
+    return true;
+  });
+
+  // 2. Calculate Real Stats
+  const totalRecovery = filteredInteractions.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+  const visitCount = filteredInteractions.length;
+  const payments = filteredInteractions.filter(d => d.type === 'payment').length;
+  const efficiency = visitCount > 0 ? Math.round((payments / visitCount) * 100) : 0;
+
+  // 3. Calculate Real Chart Trend (Always shows Last 7 Days dynamically)
+  const last7Days = Array.from({length: 7}).map((_, i) => subDays(new Date(), 6 - i));
+  const trendData = last7Days.map(day => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    const dayInts = interactions.filter(i => format(i.dateObj, 'yyyy-MM-dd') === dateStr);
+    return dayInts.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  });
+  
+  const maxTrend = Math.max(...trendData, 1); // Avoid division by zero
+  const trendHeights = trendData.map(val => (val / maxTrend) * 100);
+
+  // 4. Print PDF functionality
+  const handleDownloadPDF = () => {
+    window.print();
+  };
+
+  // Helper to get formatted date range for the PDF Report
+  const getPeriodText = () => {
+    const today = new Date();
+    if (timeframe === 'week') return `${format(subDays(today, 7), 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
+    if (timeframe === 'month') return `${format(startOfMonth(today), 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
+    if (filteredInteractions.length > 0) {
+      // Oldest interaction is at the end of the array because we sorted newest first
+      const oldest = filteredInteractions[filteredInteractions.length - 1].dateObj;
+      return `${format(oldest, 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
+    }
+    return 'All Time';
+  };
 
   if (loading) return <div className="p-8 text-center text-slate-400">Loading reports...</div>;
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Performance</h1>
-        <button className="bg-white p-3 rounded-2xl android-shadow border border-slate-100 flex items-center space-x-2 text-xs font-bold text-slate-600">
-          <Calendar size={16} />
-          <span>My Stats</span>
+    <div className="bg-slate-50 min-h-screen print:bg-white print:p-0">
+      
+      {/* ========================================== */}
+      {/* SCREEN UI: Visible on device, hidden on PDF */}
+      {/* ========================================== */}
+      <div className="p-6 space-y-8 pb-24 print:hidden">
+        
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold tracking-tight">Performance</h1>
+          
+          <div className="relative">
+            <select 
+              value={timeframe} 
+              onChange={(e) => setTimeframe(e.target.value as any)}
+              className="appearance-none bg-white p-3 pr-8 rounded-2xl android-shadow border border-slate-100 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="week">Last 7 Days</option>
+              <option value="month">This Month</option>
+              <option value="all">All Time</option>
+            </select>
+            <Calendar size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Main Stats Card */}
+        <div className="bg-white p-6 rounded-3xl shadow-lg border border-slate-100 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-6 opacity-10">
+            <TrendingUp size={80} className="text-emerald-500" />
+          </div>
+          <div className="relative z-10 space-y-1">
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Total Recovery</p>
+            <h2 className="text-4xl font-black text-emerald-600">{formatCurrency(totalRecovery)}</h2>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <StatItem label="Visit Count" value={visitCount.toString()} icon={<BarChart3 size={20} />} />
+          <StatItem label="Efficiency" value={`${efficiency}%`} icon={<PieChart size={20} />} />
+        </div>
+
+        {/* Real-time Bar Chart */}
+        <div className="space-y-4">
+          <h3 className="font-bold text-slate-800">Collection Trend (7 Days)</h3>
+          <div className="premium-card p-6 h-48 flex items-end justify-between bg-white border border-slate-100 shadow-sm">
+            {trendHeights.map((h, i) => (
+              <div key={i} className="flex flex-col items-center justify-end w-8 h-full group relative">
+                <div className="absolute -top-8 bg-slate-800 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                  {formatCurrency(trendData[i])}
+                </div>
+                <div 
+                  className="w-full rounded-t-xl bg-brand-500 transition-all duration-500 group-hover:bg-brand-400" 
+                  style={{ height: `${Math.max(h, 2)}%` }} 
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between px-2 text-[10px] font-bold text-slate-400">
+            {last7Days.map((day, i) => (
+              <span key={i}>{format(day, 'EEE').toUpperCase()}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* PDF Export Button */}
+        <button 
+          onClick={handleDownloadPDF}
+          className="w-full bg-brand-50 text-brand-700 p-5 rounded-2xl font-bold flex items-center justify-center space-x-2 border border-brand-100 active:bg-brand-100 transition-colors"
+        >
+          <Download size={20} />
+          <span>Save as PDF Report</span>
         </button>
-      </div>
 
-      {/* Summary Stats */}
-      <div className="premium-card bg-emerald-500 p-6 text-white overflow-hidden relative">
-        <div className="absolute top-0 right-0 -mr-12 -mt-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
-        <div className="relative z-10 flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-emerald-100 text-[10px] font-bold uppercase tracking-widest">Your Recovery</p>
-            <h2 className="text-3xl font-black">{formatCurrency(stats.totalRecovery)}</h2>
-          </div>
-          <div className="bg-white/20 p-4 rounded-4xl">
-            <TrendingUp size={32} />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <StatItem label="Visit Count" value={stats.visitCount.toString()} icon={<BarChart3 size={20} />} />
-        <StatItem label="Efficiency" value={`${stats.efficiency}%`} icon={<PieChart size={20} />} />
-      </div>
-
-      {/* Placeholder Chart */}
-      <div className="space-y-4">
-        <h3 className="font-bold">Collection Trend</h3>
-        <div className="premium-card p-6 h-48 flex items-end justify-between bg-slate-50 border-dashed">
-          {[40, 70, 45, 90, 65, 80, 55].map((h, i) => (
-            <div key={i} className="w-8 rounded-t-xl bg-brand-600 transition-all hover:bg-brand-500 cursor-pointer" style={{ height: `${h}%` }}>
-              <div className="w-full h-1 bg-white/30 rounded-t-xl" />
+        {/* Visit History Log */}
+        <div className="space-y-4 pt-4">
+          <h3 className="font-bold text-slate-800 border-b border-slate-200 pb-2">Recent Visit History</h3>
+          
+          {filteredInteractions.length === 0 ? (
+            <div className="text-center py-10 text-slate-400 text-sm">No visits found in this timeframe.</div>
+          ) : (
+            <div className="space-y-3">
+              {filteredInteractions.map((interaction) => (
+                <div key={interaction.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm">{interaction.customerName}</h4>
+                      <div className="flex items-center text-[10px] text-slate-400 space-x-1 mt-0.5">
+                        <Clock size={10} />
+                        <span>{format(interaction.dateObj, 'MMM dd, hh:mm a')}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className={cn(
+                        "px-2 py-1 rounded-md text-[10px] font-bold uppercase",
+                        interaction.type === 'payment' ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"
+                      )}>
+                        {interaction.status}
+                      </span>
+                      {interaction.amount > 0 && (
+                        <div className="font-black text-emerald-600 text-sm mt-1">
+                          {formatCurrency(interaction.amount)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {interaction.notes && (
+                    <div className="mt-3 bg-slate-50 p-3 rounded-xl text-xs text-slate-600 flex items-start space-x-2 border border-slate-100">
+                      <MessageSquare size={14} className="text-slate-400 mt-0.5 shrink-0" />
+                      <p className="italic leading-relaxed">{interaction.notes}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        <div className="flex justify-between px-2 text-[10px] font-bold text-slate-400">
-          <span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span>
+          )}
         </div>
       </div>
 
-      <button className="w-full premium-card p-5 border-brand-100 text-brand-600 font-bold flex items-center justify-center space-x-2 active:bg-brand-50 transition-colors">
-        <Download size={20} />
-        <span>Download PDF Report</span>
-      </button>
+      {/* ========================================== */}
+      {/* PDF UI: Hidden on device, visible on Print */}
+      {/* ========================================== */}
+      <div className="hidden print:block p-8 bg-white font-sans text-slate-900">
+        
+        {/* Report Header */}
+        <div className="border-b-2 border-slate-800 pb-6 mb-8">
+          <div className="flex justify-between items-end">
+            <div>
+              <h1 className="text-3xl font-black uppercase tracking-widest text-slate-900 mb-2">Field Collection Report</h1>
+              <p className="text-sm font-medium text-slate-600">Generated on: {format(new Date(), 'PPpp')}</p>
+              <p className="text-sm font-medium text-slate-600">Reporting Period: <span className="font-bold text-slate-900">{getPeriodText()}</span></p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-slate-500 font-bold uppercase tracking-widest">Agent Detail</p>
+              <p className="text-sm font-medium text-slate-800">{auth.currentUser?.email || 'Authorized Agent'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Report Summary */}
+        <div className="flex space-x-6 mb-8">
+          <div className="flex-1 p-4 border border-slate-200 rounded-lg bg-slate-50">
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Total Amount Recovered</p>
+            <p className="text-2xl font-black text-emerald-600">{formatCurrency(totalRecovery)}</p>
+          </div>
+          <div className="flex-1 p-4 border border-slate-200 rounded-lg bg-slate-50">
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Total Field Visits</p>
+            <p className="text-2xl font-black">{visitCount}</p>
+          </div>
+          <div className="flex-1 p-4 border border-slate-200 rounded-lg bg-slate-50">
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Conversion Efficiency</p>
+            <p className="text-2xl font-black">{efficiency}%</p>
+          </div>
+        </div>
+
+        {/* Detailed Table */}
+        <div className="mb-4">
+          <h2 className="text-lg font-bold border-b border-slate-300 pb-2 mb-4">Detailed Interaction Log</h2>
+          {filteredInteractions.length === 0 ? (
+            <p className="text-sm text-slate-500 italic">No interactions recorded during this period.</p>
+          ) : (
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b-2 border-slate-800 bg-slate-50 text-slate-700">
+                  <th className="py-3 px-2 font-bold w-1/6">Date & Time</th>
+                  <th className="py-3 px-2 font-bold w-1/5">Customer Name</th>
+                  <th className="py-3 px-2 font-bold w-1/6">Status</th>
+                  <th className="py-3 px-2 font-bold w-1/6 text-right">Amount</th>
+                  <th className="py-3 px-2 font-bold w-1/3">Remarks / Feedback</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-700">
+                {filteredInteractions.map((interaction, idx) => (
+                  <tr key={interaction.id} className={cn("border-b border-slate-200", idx % 2 === 0 ? "bg-white" : "bg-slate-50/50")}>
+                    <td className="py-3 px-2 align-top">
+                      <div className="font-medium">{format(interaction.dateObj, 'MMM dd, yyyy')}</div>
+                      <div className="text-xs text-slate-500">{format(interaction.dateObj, 'hh:mm a')}</div>
+                    </td>
+                    <td className="py-3 px-2 align-top font-bold text-slate-900">{interaction.customerName}</td>
+                    <td className="py-3 px-2 align-top">
+                      <span className={cn("font-bold text-xs uppercase", interaction.type === 'payment' ? "text-emerald-600" : "text-orange-600")}>
+                        {interaction.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-2 align-top font-black text-right text-slate-900">
+                      {interaction.amount > 0 ? formatCurrency(interaction.amount) : '-'}
+                    </td>
+                    <td className="py-3 px-2 align-top text-xs italic text-slate-600">
+                      {interaction.notes || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-12 pt-4 border-t border-slate-300 text-center text-xs text-slate-400">
+          <p>This is a system generated report from the ProCollect Meta application.</p>
+        </div>
+
+      </div>
     </div>
   );
 }
 
 function StatItem({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   return (
-    <div className="premium-card p-4 space-y-3">
-      <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">
+    <div className="bg-white p-4 rounded-2xl space-y-3 shadow-sm border border-slate-100">
+      <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-brand-500">
         {icon}
       </div>
       <div>
