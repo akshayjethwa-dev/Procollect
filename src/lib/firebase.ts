@@ -11,7 +11,9 @@ import {
   getIdTokenResult
 } from 'firebase/auth';
 import { 
-  getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection, 
   doc, 
   getDoc, 
@@ -39,7 +41,7 @@ import {
   ref as storageRef, 
   uploadBytesResumable, 
   getDownloadURL 
-} from 'firebase/storage'; // Added for User Story 2.1
+} from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -53,12 +55,16 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app); // Initialize Storage
 
-/**
- * Helper to check if the current user has the 'isSubscribed' custom claim.
- */
+// Enable Offline Persistence with multiple tab support
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
+
+export const storage = getStorage(app);
+
 export const checkSubscriptionStatus = async (): Promise<boolean> => {
   const user = auth.currentUser;
   if (!user) return false;
@@ -93,7 +99,7 @@ export {
   increment,
   arrayUnion,
   arrayRemove,
-  storageRef, // Exported for use in storage.ts
+  storageRef,
   uploadBytesResumable,
   getDownloadURL
 };

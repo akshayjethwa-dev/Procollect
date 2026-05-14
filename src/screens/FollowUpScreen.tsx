@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { auth, db, collection, query, where, onSnapshot, orderBy, doc, updateDoc } from '../lib/firebase';
-import { ChevronLeft, Calendar, Clock, CheckCircle2, Phone, MessageSquare, User } from 'lucide-react';
+import { ChevronLeft, Calendar, Clock, CheckCircle2, Phone, MessageSquare, User, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { formatCurrency, cn } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export default function FollowUpScreen() {
@@ -23,17 +22,7 @@ export default function FollowUpScreen() {
     const unsub = onSnapshot(q, async (snap) => {
       const followupDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       
-      // Enrich with customer data
-      const enriched = await Promise.all(followupDocs.map(async (f) => {
-        try {
-          // This is a bit inefficient in a loop, but for a pilot with small lists it's okay.
-          // Better would be to use a separate query or join logic if possible.
-          // For now, let's just keep it simple.
-          return f;
-        } catch (e) {
-          return f;
-        }
-      }));
+      const enriched = await Promise.all(followupDocs.map(async (f) => f));
 
       setFollowups(enriched);
       setLoading(false);
@@ -42,13 +31,34 @@ export default function FollowUpScreen() {
     });
 
     return () => unsub();
-  }, [auth.currentUser]);
+  }, []);
 
   const handleComplete = async (id: string) => {
-    try {
-      await updateDoc(doc(db, 'followups', id), { completed: true });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `followups/${id}`);
+    // Function to submit update logic with/without coords
+    const saveCompletion = async (coords: { lat: number, lng: number } | null) => {
+      try {
+        await updateDoc(doc(db, 'followups', id), { 
+          completed: true,
+          completedAt: new Date().toISOString(),
+          completionLocation: coords
+        });
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, `followups/${id}`);
+      }
+    };
+
+    // Grab geolocation
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => saveCompletion({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (err) => {
+          console.warn("Could not fetch location:", err);
+          saveCompletion(null); // save anyway if user denies permission
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } else {
+      saveCompletion(null);
     }
   };
 
@@ -93,18 +103,18 @@ export default function FollowUpScreen() {
 
               <div className="flex items-center justify-between pt-2">
                 <div className="flex space-x-2">
-                  <button 
-                    onClick={() => window.location.href=`tel:${f.mobile}`}
+                  <a 
+                    href={`tel:${f.mobile}`}
                     className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center"
                   >
                     <Phone size={18} />
-                  </button>
-                  <button 
-                    onClick={() => window.location.href=`https://wa.me/91${f.mobile}`}
+                  </a>
+                  <a 
+                    href={`https://wa.me/91${f.mobile}`} target="_blank" rel="noopener noreferrer"
                     className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center"
                   >
                     <MessageSquare size={18} />
-                  </button>
+                  </a>
                   <button 
                     onClick={() => navigate(`/customers/${f.customerId}`)}
                     className="w-10 h-10 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center"

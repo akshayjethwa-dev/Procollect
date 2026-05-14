@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Search, Filter, Phone, MessageSquare, MapPin, ChevronRight, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { auth, db, collection, query, onSnapshot, orderBy, where } from '../lib/firebase';
+import { auth, db, collection, query, onSnapshot, where } from '../lib/firebase';
 import { formatCurrency, cn } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
@@ -13,7 +13,6 @@ export default function CustomerListScreen() {
   useEffect(() => {
     if (!db || !auth.currentUser) return;
 
-    // Pilot requirement: Each user can only access their own data
     const q = query(
       collection(db, 'customers'), 
       where('assignedAgentId', '==', auth.currentUser.uid)
@@ -25,7 +24,7 @@ export default function CustomerListScreen() {
       handleFirestoreError(error, OperationType.LIST, 'customers');
     });
     return unsub;
-  }, [auth.currentUser]);
+  }, []);
 
   const filtered = customers.filter(c => {
     const matchesSearch = c.name?.toLowerCase().includes(search.toLowerCase()) || 
@@ -110,25 +109,30 @@ export default function CustomerListScreen() {
             </div>
 
             <div className="flex items-center justify-between border-t border-slate-50 pt-4">
-              <div className="flex space-x-3">
-                <button 
-                  onClick={(e) => { e.preventDefault(); window.location.href=`tel:${customer.mobile}`; }}
+              <div className="flex space-x-3" onClick={(e) => e.stopPropagation() /* Prevent Link trigger on action click */}>
+                {/* Native dialer anchor */}
+                <a 
+                  href={`tel:${customer.mobile}`}
                   className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center"
                 >
                   <Phone size={18} />
-                </button>
-                <button 
-                  onClick={(e) => { e.preventDefault(); window.location.href=`https://wa.me/91${customer.mobile}`; }}
+                </a>
+                {/* Native WhatsApp anchor */}
+                <a 
+                  href={`https://wa.me/91${customer.mobile}`}
+                  target="_blank" rel="noopener noreferrer"
                   className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center"
                 >
                   <MessageSquare size={18} />
-                </button>
-                <button 
-                  onClick={(e) => { e.preventDefault(); window.location.href=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(customer.address)}`; }}
+                </a>
+                {/* Native Google Maps anchor */}
+                <a 
+                  href={`https://maps.google.com/?q=${encodeURIComponent(customer.address)}`}
+                  target="_blank" rel="noopener noreferrer"
                   className="w-10 h-10 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center"
                 >
                   <MapPin size={18} />
-                </button>
+                </a>
               </div>
               <div className="text-slate-300">
                 <ChevronRight size={20} />

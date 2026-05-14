@@ -13,12 +13,16 @@ export default defineConfig(({mode}) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+        workbox: {
+          // Cache all static assets required for offline rendering
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        },
         manifest: {
           name: 'ProCollect Meta',
           short_name: 'ProCollect',
           description: 'Smart Collection Management app for loan recovery agents.',
           theme_color: '#0073c1',
-          background_color: '#f8fafc', // slate-50
+          background_color: '#f8fafc',
           display: 'standalone',
           orientation: 'portrait',
           icons: [

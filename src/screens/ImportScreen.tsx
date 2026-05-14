@@ -331,7 +331,7 @@ export default function ImportScreen() {
                     <p className="text-xs text-slate-500 font-medium">
                       {item.loanId} • {item.mobile}
                     </p>
-                    <p className="text-[10px] text-slate-400 mt-1 max-w-[200px] truncate">
+                    <p className="text-[10px] text-slate-400 mt-1 max-w-50 truncate">
                       {item.address}
                     </p>
                   </div>
@@ -365,7 +365,7 @@ export default function ImportScreen() {
           animate={{ opacity: 1, y: 0 }}
           className="bg-red-50 text-red-600 p-4 rounded-2xl flex items-center space-x-3 border border-red-100"
         >
-          <AlertCircle size={20} className="flex-shrink-0" />
+          <AlertCircle size={20} className="shrink-0" />
           <p className="text-xs font-bold">{error}</p>
         </motion.div>
       )}
