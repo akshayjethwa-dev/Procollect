@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { extractDataFromPDF } from '../services/geminiService';
-// ✅ FIXED: Imported collectionGroup directly from the official firebase package
-import { collectionGroup } from 'firebase/firestore'; 
 import { db, auth, collection, doc, writeBatch, getDocs, query, where, setDoc } from '../lib/firebase';
 import { uploadFieldDocument } from '../lib/storage';
 import { useNavigate } from 'react-router-dom';
@@ -34,27 +32,16 @@ export default function ImportScreen() {
         try {
           const infoMap = new Map();
 
-          // 1. Fetch Legacy loans (stored directly on customers)
+          // Fetch all flat customers to check for existing Loan IDs
           const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
           const existingCustDocs = await getDocs(existingCustQuery);
+          
           existingCustDocs.docs.forEach(d => {
-            // ✅ FIXED: Cast as 'any' to resolve 'unknown' TS error
             const data = d.data() as any; 
-            if (data.loanId) infoMap.set(String(data.loanId), { batchId: data.batchId || 'Legacy' });
-          });
-
-          // 2. Fetch New subcollection loans using collectionGroup
-          try {
-            const existingLoansQuery = query(collectionGroup(db, 'loans'), where('assignedAgentId', '==', auth.currentUser.uid));
-            const existingLoansDocs = await getDocs(existingLoansQuery);
-            existingLoansDocs.docs.forEach(d => {
-              // ✅ FIXED: Cast as 'any' to resolve 'unknown' TS error
-              const data = d.data() as any;
+            if (data.loanId) {
               infoMap.set(String(data.loanId), { batchId: data.batchId || 'Legacy' });
-            });
-          } catch (e) {
-            console.warn("CollectionGroup query failed. You may need to create an index in Firebase Console.", e);
-          }
+            }
+          });
 
           setExistingLoansInfo(infoMap);
         } catch (error) {
@@ -201,17 +188,6 @@ export default function ImportScreen() {
     setError(null);
 
     try {
-      // Re-fetch existing customers to map by Mobile Number
-      const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
-      const existingCustDocs = await getDocs(existingCustQuery);
-      
-      const customersByMobile = new Map();
-      existingCustDocs.docs.forEach(d => {
-        // ✅ FIXED: Cast as 'any' to resolve 'unknown' TS error
-        const data = d.data() as any;
-        customersByMobile.set(String(data.mobile), { id: d.id, ...data });
-      });
-
       // Filter out duplicate loan IDs based on the Map we built on mount
       const finalDataToImport = extractedData.filter(item => !existingLoansInfo.has(String(item.loanId)));
 
@@ -219,7 +195,7 @@ export default function ImportScreen() {
         throw new Error("All items in this list are already in your database (duplicate Loan IDs).");
       }
 
-      // --- AC1: CREATE BATCH METADATA DOCUMENT ---
+      // --- CREATE BATCH METADATA DOCUMENT ---
       const batchDocRef = doc(collection(db, 'batches'));
       const batchData = {
         id: batchDocRef.id,
@@ -234,71 +210,39 @@ export default function ImportScreen() {
 
       await setDoc(batchDocRef, batchData);
 
-      // --- AC2: GROUP BY MOBILE AND SAVE LOANS TO SUBCOLLECTION ---
-      const groupedByMobile = new Map<string, any[]>();
-      finalDataToImport.forEach(item => {
-        const m = String(item.mobile);
-        if (!groupedByMobile.has(m)) groupedByMobile.set(m, []);
-        groupedByMobile.get(m)?.push(item);
-      });
-
+      // --- IMPORT FLAT LOANS DIRECTLY TO CUSTOMERS COLLECTION ---
       let batch = writeBatch(db);
       let operationCount = 0;
 
-      for (const [mobile, loans] of Array.from(groupedByMobile.entries())) {
-        let customerDocRef;
-        let totalAdditionalDue = loans.reduce((sum, l) => sum + (Number(l.dueAmount) || 0), 0);
+      for (const item of finalDataToImport) {
+        const customerDocRef = doc(collection(db, 'customers'));
         
-        if (customersByMobile.has(mobile)) {
-          // Existing Customer: Update their aggregated total
-          const existingCust = customersByMobile.get(mobile);
-          customerDocRef = doc(db, 'customers', existingCust.id);
-          batch.update(customerDocRef, {
-            totalDueAmount: (existingCust.totalDueAmount || existingCust.dueAmount || 0) + totalAdditionalDue
-          });
-          operationCount++;
-        } else {
-          // New Customer
-          customerDocRef = doc(collection(db, 'customers'));
-          const firstItem = loans[0];
-          batch.set(customerDocRef, {
-            id: customerDocRef.id,
-            name: firstItem.name,
-            mobile: firstItem.mobile,
-            address: firstItem.address,
-            totalDueAmount: totalAdditionalDue,
-            totalReceivedAmount: 0,
-            status: 'Pending',
-            assignedAgentId: auth.currentUser?.uid,
-            batchId: batchDocRef.id,
-            createdAt: new Date().toISOString(),
-          });
-          operationCount++;
-        }
+        batch.set(customerDocRef, {
+          id: customerDocRef.id,
+          name: item.name,
+          mobile: item.mobile,
+          address: item.address,
+          loanId: item.loanId,
+          // Support both legacy and new aggregate fields to keep the UI fully backwards compatible
+          dueAmount: Number(item.dueAmount) || 0,
+          totalDueAmount: Number(item.dueAmount) || 0,
+          dueDate: item.dueDate,
+          receivedAmount: 0,
+          totalReceivedAmount: 0,
+          status: 'Pending',
+          assignedAgentId: auth.currentUser?.uid,
+          batchId: batchDocRef.id,
+          createdAt: new Date().toISOString(),
+          needsReview: item.needsReview || false
+        });
+        
+        operationCount++;
 
-        // Add each loan as a subcollection document
-        for (const loanItem of loans) {
-          const loanDocRef = doc(collection(db, 'customers', customerDocRef.id, 'loans'));
-          batch.set(loanDocRef, {
-            id: loanDocRef.id,
-            customerId: customerDocRef.id,
-            loanId: loanItem.loanId,
-            dueAmount: Number(loanItem.dueAmount) || 0,
-            dueDate: loanItem.dueDate,
-            receivedAmount: 0,
-            status: 'Pending',
-            assignedAgentId: auth.currentUser?.uid,
-            batchId: batchDocRef.id,
-            createdAt: new Date().toISOString()
-          });
-          operationCount++;
-
-          // Commit chunk if we reach Firebase batch limits
-          if (operationCount > 450) {
-            await batch.commit();
-            batch = writeBatch(db);
-            operationCount = 0;
-          }
+        // Commit chunk if we reach Firebase batch limits
+        if (operationCount > 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          operationCount = 0;
         }
       }
 
@@ -433,7 +377,7 @@ export default function ImportScreen() {
                 const isEditing = editingIndex === i;
                 const activeData = isEditing ? editForm : item;
                 
-                // Fetch duplicate info from the Map instead of a Set
+                // Fetch duplicate info from the Map
                 const duplicateInfo = existingLoansInfo.get(String(activeData.loanId));
                 const isDuplicate = !!duplicateInfo;
 
