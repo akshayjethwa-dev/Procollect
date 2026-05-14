@@ -2,6 +2,64 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper to check if user has an active subscription
+    function isSubscribed() {
+      // DEVELOPMENT/PILOT MODE: Allow all authenticated users to bypass subscription check.
+      // PRODUCTION MODE: Once your backend/Razorpay is ready, delete 'return true;' and uncomment the line below.
+      return true; 
+      // return request.auth.token.isSubscribed == true;
+    }
+
+    // Rules for User Profiles
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Rules for Customers
+    match /customers/{customerId} {
+      // Agents can only read customers assigned to them
+      allow read: if isAuthenticated() && resource.data.assignedAgentId == request.auth.uid;
+      
+      // Agents can only create/update if they are assigned
+      allow create, update: if isAuthenticated() 
+        && request.resource.data.assignedAgentId == request.auth.uid
+        && isSubscribed();
+      
+      allow delete: if false; // Prevent accidental deletion of financial records
+    }
+
+    // Proactively added: Rules for Interactions (used in CollectionUpdateScreen)
+    match /interactions/{interactionId} {
+      allow read, write: if isAuthenticated() 
+        && request.auth.uid == (resource == null ? request.resource.data.agentId : resource.data.agentId);
+    }
+
+    // Proactively added: Rules for Notifications (used in CollectionUpdateScreen)
+    match /notifications/{notificationId} {
+      allow read, write: if isAuthenticated() 
+        && request.auth.uid == (resource == null ? request.resource.data.recipientId : resource.data.recipientId);
+    }
+
+    // Rules for Visits and Follow-ups
+    match /visits/{visitId} {
+      allow read, write: if isAuthenticated() 
+        && request.auth.uid == (resource == null ? request.resource.data.agentId : resource.data.agentId)
+        && isSubscribed();
+    }
+    
+    match /followups/{followupId} {
+      allow read, write: if isAuthenticated() 
+        && request.auth.uid == (resource == null ? request.resource.data.agentId : resource.data.agentId)
+        && isSubscribed();
+    }
+
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }

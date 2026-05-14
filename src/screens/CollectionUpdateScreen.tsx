@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { auth, db, doc, getDoc, updateDoc, collection, addDoc } from '../lib/firebase';
+// ✅ ADDED: serverTimestamp to the import below
+import { auth, db, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } from '../lib/firebase';
 import { ChevronLeft, IndianRupee, Calendar, CheckCircle2, AlertCircle, Camera, Clock } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -215,7 +216,7 @@ export default function CollectionUpdateScreen() {
                   <label className="text-[10px] font-bold text-slate-500 uppercase">Visit Notes</label>
                   <textarea
                     placeholder="Enter visit remarks..."
-                    className="w-full bg-slate-50 border-none rounded-xl p-4 min-h-[100px] text-sm focus:ring-2 focus:ring-brand-500"
+                    className="w-full bg-slate-50 border-none rounded-xl p-4 min-h-25 text-sm focus:ring-2 focus:ring-brand-500"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                   />

@@ -61,7 +61,7 @@ export default function ReportsScreen() {
             <p className="text-emerald-100 text-[10px] font-bold uppercase tracking-widest">Your Recovery</p>
             <h2 className="text-3xl font-black">{formatCurrency(stats.totalRecovery)}</h2>
           </div>
-          <div className="bg-white/20 p-4 rounded-[2rem]">
+          <div className="bg-white/20 p-4 rounded-4xl">
             <TrendingUp size={32} />
           </div>
         </div>

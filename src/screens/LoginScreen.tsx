@@ -57,7 +57,7 @@ export default function LoginScreen() {
             <button
               onClick={handleGoogleLogin}
               disabled={loading}
-              className="w-full bg-slate-900 text-white p-6 rounded-[2rem] font-bold flex items-center justify-center space-x-4 shadow-xl active:scale-95 transition-all disabled:opacity-50"
+              className="w-full bg-slate-900 text-white p-6 rounded-4xl font-bold flex items-center justify-center space-x-4 shadow-xl active:scale-95 transition-all disabled:opacity-50"
             >
               <LogIn size={24} />
               <span className="text-lg">{loading ? "Authenticating..." : "Login with Google"}</span>

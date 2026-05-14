@@ -9,11 +9,11 @@ export default function MembershipScreen() {
   return (
     <div className="p-6 pt-12 space-y-8 pb-32">
       <div className="text-center space-y-2">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-600 text-white rounded-[2rem] shadow-xl mb-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-600 text-white rounded-4xl shadow-xl mb-4">
           <Crown size={32} />
         </div>
         <h1 className="text-3xl font-black text-slate-900 leading-tight">Go Professional Meta</h1>
-        <p className="text-slate-500 font-medium max-w-[250px] mx-auto">Unlock advanced field collection tools & smart AI imports.</p>
+        <p className="text-slate-500 font-medium max-w-62.5 mx-auto">Unlock advanced field collection tools & smart AI imports.</p>
       </div>
 
       <div className="premium-card relative overflow-hidden bg-brand-900 p-8 text-white space-y-6">

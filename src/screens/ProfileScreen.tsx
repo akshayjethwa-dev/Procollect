@@ -36,7 +36,7 @@ export default function ProfileScreen() {
       {/* Profile Header */}
       <div className="text-center space-y-4">
         <div className="relative inline-block">
-          <div className="w-24 h-24 bg-brand-600 rounded-[2rem] flex items-center justify-center text-white text-3xl font-black shadow-xl shadow-brand-100">
+          <div className="w-24 h-24 bg-brand-600 rounded-4xl flex items-center justify-center text-white text-3xl font-black shadow-xl shadow-brand-100">
             {userData?.name ? userData.name[0] : <User size={48} />}
           </div>
           <div className="absolute -bottom-1 -right-1 bg-emerald-500 border-4 border-slate-50 w-8 h-8 rounded-full flex items-center justify-center text-white">

@@ -221,7 +221,7 @@ function ActionBtn({ to, icon, label, primary }: { to: string, icon: ReactNode; 
     <Link 
       to={to}
       className={cn(
-        "flex flex-col items-center justify-center p-6 rounded-[2rem] space-y-3 transition-all active:scale-95 android-shadow border",
+        "flex flex-col items-center justify-center p-6 rounded-4xl space-y-3 transition-all active:scale-95 android-shadow border",
         primary ? "bg-brand-600 text-white border-brand-500 shadow-lg shadow-brand-200" : "bg-white text-slate-700 border-slate-100"
       )}
     >
