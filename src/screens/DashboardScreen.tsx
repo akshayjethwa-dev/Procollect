@@ -13,18 +13,22 @@ import {
   Bell
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { auth, db, collection, query, where, getDocs, limit, onSnapshot } from '../lib/firebase';
-import { formatCurrency, cn } from '../lib/utils';
+import { auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
+import { formatCurrency, cn, calculateDaysOverdue } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export default function DashboardScreen() {
   const [stats, setStats] = useState({
     todayDue: 0,
     pendingFollowups: 0,
+    missedFollowups: 0, // NEW STAT: Tracks rolled-over/overdue tasks
     completedToday: 0,
     totalCollected: 0,
     totalPending: 0,
-    missed: 0
+    missed: 0,
+    overdue0to7: 0,
+    overdue8to30: 0,
+    overdue30plus: 0
   });
 
   const [recentCustomers, setRecentCustomers] = useState<any[]>([]);
@@ -53,14 +57,25 @@ export default function DashboardScreen() {
           acc.totalPending += due;
         }
         
+        if (status !== 'full payment') {
+          const daysOverdue = calculateDaysOverdue(doc.dueDate);
+          if (daysOverdue >= 1 && daysOverdue <= 7) acc.overdue0to7 += 1;
+          else if (daysOverdue >= 8 && daysOverdue <= 30) acc.overdue8to30 += 1;
+          else if (daysOverdue > 30) acc.overdue30plus += 1;
+        }
+
         return acc;
       }, {
         todayDue: 0,
-        pendingFollowups: 0,
+        pendingFollowups: stats.pendingFollowups, 
+        missedFollowups: stats.missedFollowups, 
         completedToday: 0,
         totalCollected: 0,
         totalPending: 0,
-        missed: 0
+        missed: 0,
+        overdue0to7: 0,
+        overdue8to30: 0,
+        overdue30plus: 0
       });
 
       setStats(prev => ({ ...prev, ...newStats }));
@@ -69,17 +84,34 @@ export default function DashboardScreen() {
       handleFirestoreError(error, OperationType.LIST, 'customers_stats');
     });
 
-    // Listen to followups for today
+    // Listen to followups for EXACT "Today" count and "Missed/Rolled-over" count
     const todayStr = new Date().toISOString().split('T')[0];
     const qFollowups = query(
       collection(db, 'followups'), 
       where('agentId', '==', auth.currentUser.uid),
       where('completed', '==', false)
     );
+    
     const unsubFollowups = onSnapshot(qFollowups, (snap) => {
       const docs = snap.docs.map(d => d.data());
-      const todayFollowups = docs.filter(f => f.scheduledAt && f.scheduledAt.startsWith(todayStr)).length;
-      setStats(prev => ({ ...prev, pendingFollowups: todayFollowups }));
+      
+      let todayCount = 0;
+      let missedCount = 0;
+
+      docs.forEach(f => {
+        if (!f.scheduledAt) return;
+        const taskDate = f.scheduledAt.split('T')[0];
+        
+        // Count today's standard tasks
+        if (taskDate === todayStr) todayCount++;
+        
+        // Count as missed if it was from the past OR if the cloud function rolled it over to today
+        if (taskDate < todayStr || (f.rescheduledCount && f.rescheduledCount > 0)) {
+          missedCount++;
+        }
+      });
+
+      setStats(prev => ({ ...prev, pendingFollowups: todayCount, missedFollowups: missedCount }));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'followups_stats');
     });
@@ -114,12 +146,30 @@ export default function DashboardScreen() {
         />
         <Link to="/followups">
           <StatCard 
-            label="Follow-ups" 
+            label="Today's Tasks" 
             value={stats.pendingFollowups} 
             icon={<Clock className="text-orange-600" />} 
             color="bg-orange-50"
           />
         </Link>
+
+        {/* Rescheduled/Missed Follow-up Warning Card */}
+        {stats.missedFollowups > 0 && (
+          <div className="col-span-2 bg-red-50 p-4 rounded-2xl flex items-center justify-between border border-red-100 shadow-sm">
+            <div className="flex items-center space-x-3">
+              <div className="bg-red-100 p-2 rounded-xl text-red-600">
+                <AlertCircle size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-red-900 leading-tight">Missed Follow-ups</h4>
+                <p className="text-[10px] text-red-600 font-bold uppercase tracking-wider">{stats.missedFollowups} tasks rolled over</p>
+              </div>
+            </div>
+            <Link to="/followups" className="bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-bold active:scale-95 transition-transform">
+              View
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Performance Summary Card */}
@@ -150,6 +200,25 @@ export default function DashboardScreen() {
         
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-brand-800 rounded-full blur-3xl opacity-50" />
+      </div>
+
+      {/* OVERDUE AGEING BUCKETS */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-bold">Overdue Ageing</h2>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="premium-card p-4 text-center border-b-4 border-yellow-400">
+            <div className="text-2xl font-black text-slate-800">{stats.overdue0to7}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">0-7 Days</div>
+          </div>
+          <div className="premium-card p-4 text-center border-b-4 border-orange-500">
+            <div className="text-2xl font-black text-slate-800">{stats.overdue8to30}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">8-30 Days</div>
+          </div>
+          <div className="premium-card p-4 text-center border-b-4 border-red-600">
+            <div className="text-2xl font-black text-slate-800">{stats.overdue30plus}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">30+ Days</div>
+          </div>
+        </div>
       </div>
 
       {/* Action Buttons */}
@@ -204,13 +273,13 @@ export default function DashboardScreen() {
 
 function StatCard({ label, value, icon, color }: { label: string; value: number | string; icon: ReactNode; color: string }) {
   return (
-    <div className="premium-card p-4 space-y-3">
+    <div className="premium-card p-4 space-y-3 flex flex-col justify-between h-full">
       <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", color)}>
         {icon}
       </div>
-      <div>
-        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">{label}</p>
-        <h3 className="text-xl font-bold">{value}</h3>
+      <div className="mt-2">
+        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">{label}</p>
+        <h3 className="text-2xl font-black text-slate-900 leading-none mt-1">{value}</h3>
       </div>
     </div>
   );

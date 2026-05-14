@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Search, Filter, Phone, MessageSquare, MapPin, ChevronRight, User, Layers } from 'lucide-react';
+import { Search, Filter, Phone, MessageSquare, MapPin, ChevronRight, User, Layers, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { auth, db, collection, query, onSnapshot, where } from '../lib/firebase';
-import { formatCurrency, cn } from '../lib/utils';
+import { formatCurrency, cn, calculateDaysOverdue, getAgeingBucket } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
-// --- NEW: Explicitly define the Batch type so TypeScript knows 'createdAt' exists ---
 interface BatchImport {
   id: string;
   fileName: string;
@@ -16,7 +15,6 @@ interface BatchImport {
 
 export default function CustomerListScreen() {
   const [customers, setCustomers] = useState<any[]>([]);
-  // Use the explicit interface here
   const [batches, setBatches] = useState<BatchImport[]>([]); 
   
   const [filter, setFilter] = useState('All');
@@ -26,7 +24,6 @@ export default function CustomerListScreen() {
   useEffect(() => {
     if (!db || !auth.currentUser) return;
 
-    // 1. Fetch Customers
     const qCustomers = query(
       collection(db, 'customers'), 
       where('assignedAgentId', '==', auth.currentUser.uid)
@@ -38,27 +35,23 @@ export default function CustomerListScreen() {
       handleFirestoreError(error, OperationType.LIST, 'customers');
     });
 
-    // 2. Fetch Batches (Import History)
     const qBatches = query(
       collection(db, 'batches'),
       where('createdBy', '==', auth.currentUser.uid)
     );
 
     const unsubBatches = onSnapshot(qBatches, (snapshot) => {
-      // Cast the fetched data as BatchImport to satisfy TypeScript
       const fetchedBatches = snapshot.docs.map(doc => ({ 
         id: doc.id, 
         ...(doc.data() as any)
       } as BatchImport));
       
-      // Sort newest batches first
       fetchedBatches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setBatches(fetchedBatches);
     }, (error) => {
       console.error("Failed to fetch batches:", error);
     });
 
-    // Cleanup both listeners on unmount
     return () => {
       unsubCustomers();
       unsubBatches();
@@ -66,7 +59,6 @@ export default function CustomerListScreen() {
   }, []);
 
   const filtered = customers.filter(c => {
-    // Filter by Selected Batch
     if (selectedBatch !== 'all' && c.batchId !== selectedBatch) return false;
 
     const matchesSearch = c.name?.toLowerCase().includes(search.toLowerCase()) || 
@@ -75,15 +67,21 @@ export default function CustomerListScreen() {
     
     if (!matchesSearch) return false;
 
-    // Determine the due amount (use aggregate if available, fallback to legacy)
     const dueAmt = c.totalDueAmount !== undefined ? c.totalDueAmount : (c.dueAmount || 0);
+    const daysOverdue = calculateDaysOverdue(c.dueDate);
 
+    // Filter Logic
     if (filter === 'All') return true;
     if (filter === 'Due Today') {
       const today = new Date().toISOString().split('T')[0];
       return c.dueDate === today;
     }
     if (filter === 'High Amount') return dueAmt > 20000;
+    
+    // Ageing bucket filters
+    if (filter === '0-7 days Overdue') return daysOverdue >= 1 && daysOverdue <= 7 && c.status !== 'Full Payment';
+    if (filter === '8-30 days Overdue') return daysOverdue >= 8 && daysOverdue <= 30 && c.status !== 'Full Payment';
+    if (filter === '30+ days Overdue') return daysOverdue > 30 && c.status !== 'Full Payment';
     
     return c.status === filter;
   });
@@ -105,7 +103,7 @@ export default function CustomerListScreen() {
           />
         </div>
 
-        {/* Batch Filter Dropdown (Only shows if batches exist) */}
+        {/* Batch Filter Dropdown */}
         {batches.length > 0 && (
           <div className="relative">
             <Layers className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-500" size={18} />
@@ -129,13 +127,17 @@ export default function CustomerListScreen() {
 
         {/* Quick Filter Pills */}
         <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
-          {['All', 'Due Today', 'High Amount', 'Pending', 'Promise to Pay', 'Partial Payment'].map(f => (
+          {['All', 'Due Today', '0-7 days Overdue', '8-30 days Overdue', '30+ days Overdue', 'High Amount', 'Pending', 'Promise to Pay'].map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={cn(
-                "px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all",
-                filter === f ? "bg-brand-600 text-white shadow-md shadow-brand-100" : "bg-white text-slate-500 hover:bg-slate-50"
+                "px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border",
+                filter === f 
+                  ? "bg-brand-600 text-white border-brand-600 shadow-md shadow-brand-100" 
+                  : f.includes('Overdue') 
+                    ? "bg-white text-red-600 border-red-100 hover:bg-red-50" 
+                    : "bg-white text-slate-500 border-slate-100 hover:bg-slate-50"
               )}
             >
               {f}
@@ -146,14 +148,18 @@ export default function CustomerListScreen() {
 
       <div className="space-y-4">
         {filtered.map((customer) => {
-          // Calculate display due amount for each customer
           const displayDue = customer.totalDueAmount !== undefined ? customer.totalDueAmount : (customer.dueAmount || 0);
+          const daysOverdue = calculateDaysOverdue(customer.dueDate);
+          const isOverdue = daysOverdue > 0 && customer.status !== 'Full Payment';
 
           return (
             <Link 
               to={`/customers/${customer.id}`} 
               key={customer.id} 
-              className="premium-card p-4 block active:scale-[0.98] transition-transform"
+              className={cn(
+                "premium-card p-4 block active:scale-[0.98] transition-transform",
+                isOverdue && "border-l-4 border-l-red-500"
+              )}
             >
               <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center space-x-3">
@@ -161,8 +167,16 @@ export default function CustomerListScreen() {
                     <User size={24} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-900 leading-tight">{customer.name}</h4>
-                    <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest">
+                    <div className="flex items-center">
+                      <h4 className="font-bold text-slate-900 leading-tight">{customer.name}</h4>
+                      {isOverdue && (
+                        <span className="ml-2 flex items-center bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
+                          <AlertCircle size={10} className="mr-1" />
+                          {getAgeingBucket(daysOverdue)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest mt-0.5">
                       {customer.mobile}
                     </p>
                   </div>

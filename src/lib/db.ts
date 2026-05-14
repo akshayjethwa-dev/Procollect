@@ -63,6 +63,9 @@ export interface FollowUp {
   scheduledAt: string;
   notes: string;
   status: 'pending' | 'completed' | 'missed';
+  // --- NEW FIELDS FOR RECURRING / RESCHEDULING ---
+  originalScheduledAt?: string;
+  rescheduledCount?: number;
 }
 
 export interface Notification {
