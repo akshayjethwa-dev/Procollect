@@ -13,13 +13,18 @@ import {
   BadgeCheck,
   Pencil,
   Save,
-  X
+  X,
+  AlertCircle
 } from 'lucide-react';
 import { useEffect, useState, ReactNode } from 'react';
+import { useTrialStatus } from '../lib/useTrialStatus';
 
 export default function ProfileScreen() {
   const navigate = useNavigate();
   const [userData, setUserData] = useState<any>(null);
+  
+  // Trial Status Hook
+  const { isExpired, daysLeft } = useTrialStatus();
   
   // Edit Profile States
   const [isEditing, setIsEditing] = useState(false);
@@ -181,18 +186,22 @@ export default function ProfileScreen() {
 
       {/* Membership Banner */}
       {!isEditing && (
-        <Link to="/membership" className="premium-card bg-brand-50 border-brand-100 p-5 flex items-center justify-between group overflow-hidden relative active:scale-[0.98] transition-transform mt-6">
-          <div className="absolute top-0 right-0 -mr-6 -mt-6 w-24 h-24 bg-brand-200/20 rounded-full blur-2xl" />
+        <Link to="/membership" className={`premium-card p-5 flex items-center justify-between group overflow-hidden relative active:scale-[0.98] transition-transform mt-6 ${isExpired ? 'bg-red-50 border-red-100' : 'bg-brand-50 border-brand-100'}`}>
+          <div className={`absolute top-0 right-0 -mr-6 -mt-6 w-24 h-24 rounded-full blur-2xl ${isExpired ? 'bg-red-200/30' : 'bg-brand-200/20'}`} />
           <div className="flex items-center space-x-4 relative z-10">
-            <div className="w-12 h-12 bg-brand-600 text-white rounded-2xl flex items-center justify-center shadow-lg">
-              <Crown size={24} />
+            <div className={`w-12 h-12 text-white rounded-2xl flex items-center justify-center shadow-lg ${isExpired ? 'bg-red-500' : 'bg-brand-600'}`}>
+              {isExpired ? <AlertCircle size={24} /> : <Crown size={24} />}
             </div>
             <div>
-              <h3 className="font-black text-brand-900 text-sm">Free Trial Active</h3>
-              <p className="text-[10px] text-brand-600 font-bold uppercase tracking-wider">6 days remaining</p>
+              <h3 className={`font-black text-sm ${isExpired ? 'text-red-900' : 'text-brand-900'}`}>
+                {isExpired ? 'Trial Expired' : 'Free Trial Active'}
+              </h3>
+              <p className={`text-[10px] font-bold uppercase tracking-wider ${isExpired ? 'text-red-600' : 'text-brand-600'}`}>
+                {isExpired ? 'Upgrade to Pro' : `${daysLeft} days remaining`}
+              </p>
             </div>
           </div>
-          <div className="bg-brand-600 text-white p-2 rounded-xl group-hover:px-4 duration-300 transition-all flex items-center space-x-2">
+          <div className={`text-white p-2 rounded-xl group-hover:px-4 duration-300 transition-all flex items-center space-x-2 ${isExpired ? 'bg-red-500' : 'bg-brand-600'}`}>
             <span className="text-[10px] font-bold uppercase tracking-tight hidden group-hover:inline">Upgrade</span>
             <ChevronRight size={20} />
           </div>

@@ -13,10 +13,11 @@ import {
   Bell,
   Activity
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
 import { formatCurrency, cn, calculateDaysOverdue } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useTrialStatus } from '../lib/useTrialStatus';
 
 // Ultra-robust Date Checker (Handles Timezones perfectly by comparing local calendar days)
 const isDateInFilter = (dateString: string | undefined, filter: string) => {
@@ -49,6 +50,9 @@ export default function DashboardScreen() {
   
   // UI States
   const [dateFilter, setDateFilter] = useState('today');
+
+  const { isExpired } = useTrialStatus();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -91,6 +95,15 @@ export default function DashboardScreen() {
       unsubInteractions();
     };
   }, []);
+
+  const handleCustomerClick = (customerId: string) => {
+    if (isExpired) {
+      alert('Your 7-day free trial has expired. Upgrade to the Pro Plan to manage customer details and collections.');
+      navigate('/membership');
+    } else {
+      navigate(`/customers/${customerId}`);
+    }
+  };
 
   // Compute stats dynamically
   const stats = useMemo(() => {
@@ -310,7 +323,11 @@ export default function DashboardScreen() {
         
         <div className="space-y-3">
           {recentCustomers.length > 0 ? recentCustomers.map((cust) => (
-            <Link key={cust.id} to={`/customers/${cust.id}`} className="premium-card p-4 flex items-center space-x-4 active:scale-[0.98] transition-transform">
+            <div 
+              key={cust.id} 
+              onClick={() => handleCustomerClick(cust.id)} 
+              className="premium-card p-4 flex items-center space-x-4 active:scale-[0.98] transition-transform cursor-pointer"
+            >
               <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 font-bold uppercase">
                 {cust.name ? cust.name[0] : '?'}
               </div>
@@ -327,7 +344,7 @@ export default function DashboardScreen() {
                   {cust.status || 'Pending'}
                 </div>
               </div>
-            </Link>
+            </div>
           )) : (
             <div className="text-center py-10 space-y-4">
               <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300">

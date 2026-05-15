@@ -18,6 +18,7 @@ import MembershipScreen from './screens/MembershipScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import FollowUpScreen from './screens/FollowUpScreen';
 import NotificationsScreen from './screens/NotificationsScreen';
+import CheckoutScreen from './screens/CheckoutScreen'; // <-- Added Import
 import Layout from './components/Layout';
 
 export default function App() {
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="reports" element={<ReportsScreen />} />
           <Route path="followups" element={<FollowUpScreen />} />
           <Route path="notifications" element={<NotificationsScreen />} />
+          <Route path="checkout" element={<CheckoutScreen />} /> {/* <-- Added Route */}
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Route>
       </Routes>

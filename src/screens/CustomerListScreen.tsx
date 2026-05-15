@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth, db, collection, query, onSnapshot, where } from '../lib/firebase';
 import { formatCurrency, cn, calculateDaysOverdue, getAgeingBucket } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useTrialStatus } from '../lib/useTrialStatus';
 
 interface BatchImport {
   id: string;
@@ -22,6 +23,7 @@ export default function CustomerListScreen() {
   const [selectedBatch, setSelectedBatch] = useState('all');
   
   const navigate = useNavigate();
+  const { isExpired } = useTrialStatus();
 
   useEffect(() => {
     if (!db || !auth.currentUser) return;
@@ -59,6 +61,15 @@ export default function CustomerListScreen() {
       unsubBatches();
     };
   }, []);
+
+  const handleCustomerClick = (customerId: string) => {
+    if (isExpired) {
+      alert('Your 7-day free trial has expired. Upgrade to the Pro Plan to manage customer details and collections.');
+      navigate('/membership');
+    } else {
+      navigate(`/customers/${customerId}`);
+    }
+  };
 
   const filtered = customers.filter(c => {
     if (selectedBatch !== 'all' && c.batchId !== selectedBatch) return false;
@@ -157,7 +168,7 @@ export default function CustomerListScreen() {
           return (
             <div 
               key={customer.id} 
-              onClick={() => navigate(`/customers/${customer.id}`)}
+              onClick={() => handleCustomerClick(customer.id)}
               className={cn(
                 "premium-card p-4 block cursor-pointer active:scale-[0.98] transition-transform",
                 isOverdue && "border-l-4 border-l-red-500"
