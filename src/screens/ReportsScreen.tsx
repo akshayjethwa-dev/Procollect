@@ -1,6 +1,7 @@
 import { useEffect, useState, ReactNode } from 'react';
-import { BarChart3, TrendingUp, PieChart, Download, Calendar, MapPin, MessageSquare, Clock } from 'lucide-react';
-import { auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
+import { BarChart3, TrendingUp, PieChart, Download, Calendar, MessageSquare, Clock, FileSpreadsheet } from 'lucide-react';
+import { auth, db, collection, query, where, onSnapshot, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { formatCurrency, cn } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { format, subDays, startOfMonth, isAfter } from 'date-fns';
@@ -9,6 +10,7 @@ export default function ReportsScreen() {
   const [interactions, setInteractions] = useState<any[]>([]);
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'all'>('week');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -49,25 +51,75 @@ export default function ReportsScreen() {
   });
 
   // 2. Calculate Real Stats
-  const totalRecovery = filteredInteractions.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
+  const payments = filteredInteractions.filter(d => d.type === 'payment');
+  const totalRecovery = payments.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
   const visitCount = filteredInteractions.length;
-  const payments = filteredInteractions.filter(d => d.type === 'payment').length;
-  const efficiency = visitCount > 0 ? Math.round((payments / visitCount) * 100) : 0;
+  const efficiency = visitCount > 0 ? Math.round((payments.length / visitCount) * 100) : 0;
 
   // 3. Calculate Real Chart Trend (Always shows Last 7 Days dynamically)
-  const last7Days = Array.from({length: 7}).map((_, i) => subDays(new Date(), 6 - i));
+  const last7Days = Array.from({length: 7}).map((_, i) => subDays(new Date(), 6 - i)).reverse(); // Reverse so it goes oldest to newest (left to right)
+  
   const trendData = last7Days.map(day => {
     const dateStr = format(day, 'yyyy-MM-dd');
-    const dayInts = interactions.filter(i => format(i.dateObj, 'yyyy-MM-dd') === dateStr);
+    // AC1: Only calculate actual payments for the collection trend
+    const dayInts = interactions.filter(i => 
+      format(i.dateObj, 'yyyy-MM-dd') === dateStr && i.type === 'payment'
+    );
     return dayInts.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   });
   
   const maxTrend = Math.max(...trendData, 1); // Avoid division by zero
   const trendHeights = trendData.map(val => (val / maxTrend) * 100);
+  
+  // AC3: Check if we actually have data to show in the chart
+  const hasTrendData = trendData.some(val => val > 0);
 
   // 4. Print PDF functionality
   const handleDownloadPDF = () => {
     window.print();
+  };
+
+  // 5. Backend API Call for Excel/CSV Export
+  const handleExportData = async () => {
+    if (!auth.currentUser) return;
+    setExporting(true);
+    
+    try {
+      const exportReportFn = httpsCallable(functions, 'exportPerformanceReport');
+      
+      // Calls the new backend endpoint 
+      const result = await exportReportFn({
+        agentId: auth.currentUser.uid,
+        timeframe: timeframe
+      });
+
+      const { csvBase64, fileName } = result.data as any;
+      
+      // Convert Base64 response to a downloadable Blob
+      const byteCharacters = atob(csvBase64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'text/csv;charset=utf-8;' });
+      
+      // Trigger browser download
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error("Export failed:", error);
+      alert("Failed to export performance data. Ensure you have permission.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Helper to get formatted date range for the PDF Report
@@ -76,14 +128,13 @@ export default function ReportsScreen() {
     if (timeframe === 'week') return `${format(subDays(today, 7), 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
     if (timeframe === 'month') return `${format(startOfMonth(today), 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
     if (filteredInteractions.length > 0) {
-      // Oldest interaction is at the end of the array because we sorted newest first
       const oldest = filteredInteractions[filteredInteractions.length - 1].dateObj;
       return `${format(oldest, 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
     }
     return 'All Time';
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-400">Loading reports...</div>;
+  if (loading) return <div className="p-8 text-center text-slate-400 font-medium">Loading reports...</div>;
 
   return (
     <div className="bg-slate-50 min-h-screen print:bg-white print:p-0">
@@ -94,7 +145,7 @@ export default function ReportsScreen() {
       <div className="p-6 space-y-8 pb-24 print:hidden">
         
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">Performance</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Performance</h1>
           
           <div className="relative">
             <select 
@@ -128,35 +179,66 @@ export default function ReportsScreen() {
 
         {/* Real-time Bar Chart */}
         <div className="space-y-4">
-          <h3 className="font-bold text-slate-800">Collection Trend (7 Days)</h3>
-          <div className="premium-card p-6 h-48 flex items-end justify-between bg-white border border-slate-100 shadow-sm">
-            {trendHeights.map((h, i) => (
-              <div key={i} className="flex flex-col items-center justify-end w-8 h-full group relative">
-                <div className="absolute -top-8 bg-slate-800 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                  {formatCurrency(trendData[i])}
-                </div>
-                <div 
-                  className="w-full rounded-t-xl bg-brand-500 transition-all duration-500 group-hover:bg-brand-400" 
-                  style={{ height: `${Math.max(h, 2)}%` }} 
-                />
+          <h3 className="font-bold text-slate-800">Collection Trend (Last 7 Days)</h3>
+          
+          {!hasTrendData ? (
+            /* AC3: Empty State if no data */
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm h-48 flex flex-col items-center justify-center p-6 text-center space-y-2">
+              <TrendingUp size={32} className="text-slate-200" />
+              <p className="text-sm font-bold text-slate-400">No collections recorded</p>
+              <p className="text-xs text-slate-400">Start logging payments to see your performance trend here.</p>
+            </div>
+          ) : (
+            <>
+              <div className="p-6 h-48 flex items-end justify-between bg-white border border-slate-100 shadow-sm rounded-2xl">
+                {trendHeights.map((h, i) => (
+                  <div key={i} className="flex flex-col items-center justify-end w-8 h-full group relative cursor-pointer">
+                    {/* AC2: Hover tooltip with Exact Date and Amount */}
+                    <div className="absolute -top-12 flex flex-col items-center bg-slate-800 text-white py-1.5 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none shadow-lg">
+                      <span className="text-[11px] font-black">{formatCurrency(trendData[i])}</span>
+                      <span className="text-[9px] text-slate-300 font-medium">{format(last7Days[i], 'MMM dd, yyyy')}</span>
+                      {/* Tooltip triangle pointer */}
+                      <div className="absolute -bottom-1 w-2 h-2 bg-slate-800 rotate-45"></div>
+                    </div>
+                    
+                    {/* The Chart Bar */}
+                    <div 
+                      className="w-full rounded-t-xl bg-brand-500 transition-all duration-500 group-hover:bg-brand-400" 
+                      style={{ height: `${Math.max(h, 2)}%` }} // Show minimum 2% height if there's data so the bar is barely visible
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="flex justify-between px-2 text-[10px] font-bold text-slate-400">
-            {last7Days.map((day, i) => (
-              <span key={i}>{format(day, 'EEE').toUpperCase()}</span>
-            ))}
-          </div>
+              <div className="flex justify-between px-2 text-[10px] font-bold text-slate-400">
+                {last7Days.map((day, i) => (
+                  <span key={i}>{format(day, 'EEE').toUpperCase()}</span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* PDF Export Button */}
-        <button 
-          onClick={handleDownloadPDF}
-          className="w-full bg-brand-50 text-brand-700 p-5 rounded-2xl font-bold flex items-center justify-center space-x-2 border border-brand-100 active:bg-brand-100 transition-colors"
-        >
-          <Download size={20} />
-          <span>Save as PDF Report</span>
-        </button>
+        {/* Action Buttons */}
+        <div className="grid grid-cols-2 gap-3">
+          <button 
+            onClick={handleDownloadPDF}
+            className="w-full bg-slate-800 text-white p-4 rounded-2xl font-bold flex flex-col items-center justify-center space-y-1 active:bg-slate-700 transition-colors shadow-sm"
+          >
+            <Download size={20} />
+            <span className="text-[11px] uppercase tracking-wider">Visual PDF</span>
+          </button>
+
+          <button 
+            onClick={handleExportData}
+            disabled={exporting}
+            className="w-full bg-brand-50 text-brand-700 border border-brand-100 p-4 rounded-2xl font-bold flex flex-col items-center justify-center space-y-1 active:bg-brand-100 transition-colors disabled:opacity-50"
+          >
+            <FileSpreadsheet size={20} />
+            <span className="text-[11px] uppercase tracking-wider">
+              {exporting ? 'Compiling...' : 'Export Data'}
+            </span>
+          </button>
+        </div>
 
         {/* Visit History Log */}
         <div className="space-y-4 pt-4">

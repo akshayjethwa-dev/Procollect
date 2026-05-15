@@ -42,6 +42,7 @@ import {
   uploadBytesResumable, 
   getDownloadURL 
 } from 'firebase/storage';
+import { getFunctions } from 'firebase/functions'; // <-- Added Import
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -64,6 +65,9 @@ export const db = initializeFirestore(app, {
 });
 
 export const storage = getStorage(app);
+
+// Initialize Cloud Functions
+export const functions = getFunctions(app); // <-- Added Initialization
 
 export const checkSubscriptionStatus = async (): Promise<boolean> => {
   const user = auth.currentUser;
