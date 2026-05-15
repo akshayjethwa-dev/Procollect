@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { auth, db, doc, getDoc, updateDoc, collection, addDoc, query, where, orderBy, getDocs, limit } from '../lib/firebase';
+import { getUserAgencyId } from '../lib/firebase';
 import { ChevronLeft, IndianRupee, Calendar, CheckCircle2, AlertCircle, Camera, Clock, History, MapPin, Image as ImageIcon } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -119,6 +120,9 @@ export default function CollectionUpdateScreen() {
     if (!id || !selectedStatus || !customer) return;
     setSaving(true);
     try {
+      const rawAgencyId = await getUserAgencyId();
+      const agencyId = rawAgencyId || 'UNASSIGNED';
+
       const isoTimestamp = new Date().toISOString();
       const updateData: any = {
         status: selectedStatus,
@@ -150,6 +154,7 @@ export default function CollectionUpdateScreen() {
       await updateDoc(doc(db, 'customers', id), updateData);
       
       await addDoc(collection(db, 'interactions'), {
+        agencyId,
         customerId: id,
         customerName: customer.name,
         loanId: customer.loanId || 'N/A',
@@ -166,6 +171,7 @@ export default function CollectionUpdateScreen() {
 
       if (nextDate && (selectedStatus === 'Partial Payment' || selectedStatus === 'Promise to Pay')) {
         await addDoc(collection(db, 'followups'), {
+          agencyId,
           customerId: id,
           customerName: customer.name,
           mobile: customer.mobile,
@@ -179,6 +185,7 @@ export default function CollectionUpdateScreen() {
         });
 
         await addDoc(collection(db, 'notifications'), {
+          agencyId,
           recipientId: auth.currentUser?.uid,
           title: `Follow-up set: ${customer.name}`,
           message: `Scheduled for ${nextDate} (Loan: ${customer.loanId || 'N/A'})`,

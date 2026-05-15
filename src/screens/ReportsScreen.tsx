@@ -15,8 +15,11 @@ export default function ReportsScreen() {
   useEffect(() => {
     if (!auth.currentUser) return;
 
-    // Fetch all interactions for this agent
-    const q = query(collection(db, 'interactions'), where('agentId', '==', auth.currentUser.uid));
+    // FIX: Safely reads by agentId due to updated firestore.rules
+    const q = query(
+      collection(db, 'interactions'), 
+      where('agentId', '==', auth.currentUser.uid)
+    );
     
     const unsub = onSnapshot(q, (snap) => {
       const docs = snap.docs.map(d => {
@@ -24,12 +27,10 @@ export default function ReportsScreen() {
         return {
           id: d.id,
           ...data,
-          // Safely convert Firestore timestamp to JS Date
           dateObj: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(),
         };
       });
       
-      // Sort interactions newest first
       docs.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
       
       setInteractions(docs);
@@ -41,7 +42,6 @@ export default function ReportsScreen() {
     return unsub;
   }, []);
 
-  // 1. Filter data based on selected timeframe
   const filteredInteractions = interactions.filter(i => {
     if (timeframe === 'all') return true;
     const now = new Date();
@@ -50,36 +50,30 @@ export default function ReportsScreen() {
     return true;
   });
 
-  // 2. Calculate Real Stats
   const payments = filteredInteractions.filter(d => d.type === 'payment');
   const totalRecovery = payments.reduce((acc, d) => acc + (Number(d.amount) || 0), 0);
   const visitCount = filteredInteractions.length;
   const efficiency = visitCount > 0 ? Math.round((payments.length / visitCount) * 100) : 0;
 
-  // 3. Calculate Real Chart Trend (Always shows Last 7 Days dynamically)
-  const last7Days = Array.from({length: 7}).map((_, i) => subDays(new Date(), 6 - i)).reverse(); // Reverse so it goes oldest to newest (left to right)
+  const last7Days = Array.from({length: 7}).map((_, i) => subDays(new Date(), 6 - i)).reverse();
   
   const trendData = last7Days.map(day => {
     const dateStr = format(day, 'yyyy-MM-dd');
-    // AC1: Only calculate actual payments for the collection trend
     const dayInts = interactions.filter(i => 
       format(i.dateObj, 'yyyy-MM-dd') === dateStr && i.type === 'payment'
     );
     return dayInts.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   });
   
-  const maxTrend = Math.max(...trendData, 1); // Avoid division by zero
+  const maxTrend = Math.max(...trendData, 1);
   const trendHeights = trendData.map(val => (val / maxTrend) * 100);
   
-  // AC3: Check if we actually have data to show in the chart
   const hasTrendData = trendData.some(val => val > 0);
 
-  // 4. Print PDF functionality
   const handleDownloadPDF = () => {
     window.print();
   };
 
-  // 5. Backend API Call for Excel/CSV Export
   const handleExportData = async () => {
     if (!auth.currentUser) return;
     setExporting(true);
@@ -87,7 +81,6 @@ export default function ReportsScreen() {
     try {
       const exportReportFn = httpsCallable(functions, 'exportPerformanceReport');
       
-      // Calls the new backend endpoint 
       const result = await exportReportFn({
         agentId: auth.currentUser.uid,
         timeframe: timeframe
@@ -95,7 +88,6 @@ export default function ReportsScreen() {
 
       const { csvBase64, fileName } = result.data as any;
       
-      // Convert Base64 response to a downloadable Blob
       const byteCharacters = atob(csvBase64);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
@@ -104,7 +96,6 @@ export default function ReportsScreen() {
       const byteArray = new Uint8Array(byteNumbers);
       const blob = new Blob([byteArray], { type: 'text/csv;charset=utf-8;' });
       
-      // Trigger browser download
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -122,7 +113,6 @@ export default function ReportsScreen() {
     }
   };
 
-  // Helper to get formatted date range for the PDF Report
   const getPeriodText = () => {
     const today = new Date();
     if (timeframe === 'week') return `${format(subDays(today, 7), 'MMM dd, yyyy')}  to  ${format(today, 'MMM dd, yyyy')}`;
@@ -182,7 +172,6 @@ export default function ReportsScreen() {
           <h3 className="font-bold text-slate-800">Collection Trend (Last 7 Days)</h3>
           
           {!hasTrendData ? (
-            /* AC3: Empty State if no data */
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm h-48 flex flex-col items-center justify-center p-6 text-center space-y-2">
               <TrendingUp size={32} className="text-slate-200" />
               <p className="text-sm font-bold text-slate-400">No collections recorded</p>
@@ -193,18 +182,15 @@ export default function ReportsScreen() {
               <div className="p-6 h-48 flex items-end justify-between bg-white border border-slate-100 shadow-sm rounded-2xl">
                 {trendHeights.map((h, i) => (
                   <div key={i} className="flex flex-col items-center justify-end w-8 h-full group relative cursor-pointer">
-                    {/* AC2: Hover tooltip with Exact Date and Amount */}
                     <div className="absolute -top-12 flex flex-col items-center bg-slate-800 text-white py-1.5 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none shadow-lg">
                       <span className="text-[11px] font-black">{formatCurrency(trendData[i])}</span>
                       <span className="text-[9px] text-slate-300 font-medium">{format(last7Days[i], 'MMM dd, yyyy')}</span>
-                      {/* Tooltip triangle pointer */}
                       <div className="absolute -bottom-1 w-2 h-2 bg-slate-800 rotate-45"></div>
                     </div>
                     
-                    {/* The Chart Bar */}
                     <div 
                       className="w-full rounded-t-xl bg-brand-500 transition-all duration-500 group-hover:bg-brand-400" 
-                      style={{ height: `${Math.max(h, 2)}%` }} // Show minimum 2% height if there's data so the bar is barely visible
+                      style={{ height: `${Math.max(h, 2)}%` }}
                     />
                   </div>
                 ))}

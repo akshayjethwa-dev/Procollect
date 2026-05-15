@@ -19,14 +19,12 @@ import { formatCurrency, cn, calculateDaysOverdue } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useTrialStatus } from '../lib/useTrialStatus';
 
-// Ultra-robust Date Checker (Handles Timezones perfectly by comparing local calendar days)
 const isDateInFilter = (dateString: string | undefined, filter: string) => {
   if (!dateString) return false;
   
   const targetDate = new Date(dateString);
   const today = new Date();
   
-  // Normalize to purely local midnight dates
   const targetDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
   const currentDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
@@ -43,12 +41,9 @@ const isDateInFilter = (dateString: string | undefined, filter: string) => {
 };
 
 export default function DashboardScreen() {
-  // Raw Data States
   const [allCustomers, setAllCustomers] = useState<any[]>([]);
   const [allTasks, setAllTasks] = useState<any[]>([]);
   const [allInteractions, setAllInteractions] = useState<any[]>([]); 
-  
-  // UI States
   const [dateFilter, setDateFilter] = useState('today');
 
   const { isExpired } = useTrialStatus();
@@ -58,15 +53,17 @@ export default function DashboardScreen() {
     if (!auth.currentUser) return;
     const agentId = auth.currentUser.uid;
 
-    // Listen to customers (Used for portfolio totals and ageing buckets)
-    const qCustomers = query(collection(db, 'customers'), where('assignedAgentId', '==', agentId));
+    // FIX: Reverted to querying strictly by assignedAgentId so legacy data loads safely
+    const qCustomers = query(
+      collection(db, 'customers'), 
+      where('assignedAgentId', '==', agentId)
+    );
     const unsubCustomers = onSnapshot(qCustomers, (snap) => {
       setAllCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'customers_stats');
     });
 
-    // Listen to tasks (Used for pending/missed follow-ups)
     const qFollowups = query(
       collection(db, 'followups'), 
       where('agentId', '==', agentId),
@@ -78,7 +75,6 @@ export default function DashboardScreen() {
       handleFirestoreError(error, OperationType.LIST, 'followups_stats');
     });
 
-    // Listen to interactions (Used for highly accurate daily financial collections)
     const qInteractions = query(
       collection(db, 'interactions'),
       where('agentId', '==', agentId)
@@ -105,7 +101,6 @@ export default function DashboardScreen() {
     }
   };
 
-  // Compute stats dynamically
   const stats = useMemo(() => {
     const result = {
       activeCases: 0,
@@ -119,8 +114,6 @@ export default function DashboardScreen() {
       overdue30plus: 0
     };
 
-    // 1. Portfolio Totals (This is the CURRENT SNAPSHOT)
-    // The "due" amount here is already deducted if they made a payment.
     allCustomers.forEach(doc => {
       const due = Number(doc.totalDueAmount !== undefined ? doc.totalDueAmount : (doc.dueAmount || 0));
       const status = doc.status?.toLowerCase();
@@ -130,7 +123,6 @@ export default function DashboardScreen() {
         result.activeCases += 1;
       }
       
-      // Ageing Buckets
       if (status !== 'full payment') {
         const daysOverdue = calculateDaysOverdue(doc.dueDate);
         if (daysOverdue >= 1 && daysOverdue <= 7) result.overdue0to7 += 1;
@@ -139,16 +131,13 @@ export default function DashboardScreen() {
       }
     });
 
-    // 2. Period Collections & Visits 
     if (dateFilter === 'all') {
-      // For "All-Time", rely directly on the customer profiles so we don't miss legacy collections
       allCustomers.forEach(doc => {
         const received = Number(doc.totalReceivedAmount !== undefined ? doc.totalReceivedAmount : (doc.receivedAmount || 0));
         result.collectedInPeriod += received;
       });
       result.visitsInPeriod = allInteractions.length;
     } else {
-      // For specific dates (Today, Yesterday, Week), rely on precise interaction logs
       allInteractions.forEach(interaction => {
         if (isDateInFilter(interaction.timestamp, dateFilter)) {
           result.visitsInPeriod += 1;
@@ -160,7 +149,6 @@ export default function DashboardScreen() {
       });
     }
 
-    // 3. Task Metrics
     const todayStr = new Date().toISOString().split('T')[0];
     allTasks.forEach(f => {
       if (!f.scheduledAt) return;

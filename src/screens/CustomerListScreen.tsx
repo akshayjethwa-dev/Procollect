@@ -26,8 +26,10 @@ export default function CustomerListScreen() {
   const { isExpired } = useTrialStatus();
 
   useEffect(() => {
+    // Wait until auth is fully loaded
     if (!db || !auth.currentUser) return;
 
+    // FIX: Reverted to querying strictly by assignedAgentId to restore legacy lists
     const qCustomers = query(
       collection(db, 'customers'), 
       where('assignedAgentId', '==', auth.currentUser.uid)

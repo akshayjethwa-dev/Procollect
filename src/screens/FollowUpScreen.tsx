@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { auth, db, collection, query, where, onSnapshot, orderBy, doc, updateDoc } from '../lib/firebase';
-// Added RefreshCcw icon for the rolled-over indicator
 import { ChevronLeft, Calendar, Clock, CheckCircle2, Phone, MessageSquare, User, ChevronRight, AlertCircle, RefreshCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
@@ -17,7 +16,7 @@ export default function FollowUpScreen() {
   useEffect(() => {
     if (!auth.currentUser) return;
 
-    // Fetch ALL incomplete followups for the agent
+    // FIX: Removed agencyId to restore legacy follow-up tasks
     const q = query(
       collection(db, 'followups'),
       where('agentId', '==', auth.currentUser.uid),
@@ -66,10 +65,8 @@ export default function FollowUpScreen() {
     }
   };
 
-  // Helper string to compare dates reliably
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Calculate stats for the tabs
   const counts = followups.reduce((acc, f) => {
     if (!f.scheduledAt) return acc;
     const taskDate = f.scheduledAt.split('T')[0];
@@ -79,7 +76,6 @@ export default function FollowUpScreen() {
     return acc;
   }, { Overdue: 0, Today: 0, Upcoming: 0 });
 
-  // Filter the currently visible items based on activeTab
   const filteredFollowups = followups.filter(f => {
     if (!f.scheduledAt) return false;
     const taskDate = f.scheduledAt.split('T')[0];

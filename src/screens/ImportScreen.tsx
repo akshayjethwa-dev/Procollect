@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { extractDataFromPDF } from '../services/geminiService';
 import { db, auth, collection, doc, writeBatch, getDocs, query, where, setDoc } from '../lib/firebase';
+import { getUserAgencyId } from '../lib/firebase';
 import { uploadFieldDocument } from '../lib/storage';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../lib/utils';
@@ -188,7 +189,9 @@ export default function ImportScreen() {
     setError(null);
 
     try {
-      // Filter out duplicate loan IDs based on the Map we built on mount
+      const rawAgencyId = await getUserAgencyId();
+      const agencyId = rawAgencyId || 'UNASSIGNED';
+
       const finalDataToImport = extractedData.filter(item => !existingLoansInfo.has(String(item.loanId)));
 
       if (finalDataToImport.length === 0) {
@@ -199,6 +202,7 @@ export default function ImportScreen() {
       const batchDocRef = doc(collection(db, 'batches'));
       const batchData = {
         id: batchDocRef.id,
+        agencyId,
         fileName: file?.name || 'Unknown',
         filePath: extractedData.find(d => d.documentPath)?.documentPath || null,
         createdAt: new Date().toISOString(),
@@ -219,7 +223,7 @@ export default function ImportScreen() {
         
         batch.set(customerDocRef, {
           id: customerDocRef.id,
-          // ✅ FIX: Added fallback defaults ( || '' ) to prevent undefined Firestore errors
+          agencyId, 
           name: item.name || 'Unknown',
           mobile: item.mobile || '',
           address: item.address || '', 

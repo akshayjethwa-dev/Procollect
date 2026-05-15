@@ -1,3 +1,4 @@
+// src/lib/firebase.ts
 /// <reference types="vite/client" />
 
 import { initializeApp } from 'firebase/app';
@@ -42,7 +43,7 @@ import {
   uploadBytesResumable, 
   getDownloadURL 
 } from 'firebase/storage';
-import { getFunctions } from 'firebase/functions'; // <-- Added Import
+import { getFunctions } from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -57,7 +58,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Enable Offline Persistence with multiple tab support
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
@@ -65,9 +65,16 @@ export const db = initializeFirestore(app, {
 });
 
 export const storage = getStorage(app);
+export const functions = getFunctions(app);
 
-// Initialize Cloud Functions
-export const functions = getFunctions(app); // <-- Added Initialization
+// NEW: Helper to get the user's agency ID from Custom Claims
+export const getUserAgencyId = async (): Promise<string | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  
+  const tokenResult = await getIdTokenResult(user);
+  return (tokenResult.claims.agencyId as string) || null;
+};
 
 export const checkSubscriptionStatus = async (): Promise<boolean> => {
   const user = auth.currentUser;
