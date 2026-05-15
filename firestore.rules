@@ -27,16 +27,16 @@ service cloud.firestore {
 
     // Rules for Customers
     match /customers/{customerId} {
-      // FIX: Allow agent to read their own data to restore legacy/missing lists
+      // Agent can read if they own the record directly OR if they share the same agency
       allow read: if isAuthenticated() && (resource.data.assignedAgentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
       
       allow create: if isAuthenticated() 
-                    && isSameAgency(request.resource.data.agencyId)
+                    && (request.resource.data.assignedAgentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')))
                     && isSubscribed();
                     
       allow update: if isAuthenticated() 
-                    && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
-                    && isSameAgency(request.resource.data.agencyId)
+                    && (resource.data.assignedAgentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')))
+                    && (request.resource.data.assignedAgentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')))
                     && isSubscribed();
                     
       allow delete: if false; 
@@ -46,28 +46,27 @@ service cloud.firestore {
     match /batches/{batchId} {
       allow read: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
       allow create, update, delete: if isAuthenticated() 
-                                    && isSameAgency(request.resource.data.agencyId);
+                                    && (request.resource.data.createdBy == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')));
     }
 
     // Rules for Interactions
     match /interactions/{interactionId} {
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
       allow create, update, delete: if isAuthenticated() 
-                                    && isSameAgency(request.resource.data.agencyId);
+                                    && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')));
     }
 
     // Rules for Notifications
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && (resource.data.recipientId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      allow create, update, delete: if isAuthenticated() 
-                                    && isSameAgency(request.resource.data.agencyId);
+      allow create, update, delete: if isAuthenticated(); 
     }
 
     // Rules for Visits
     match /visits/{visitId} {
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
       allow create, update, delete: if isAuthenticated() 
-                                    && isSameAgency(request.resource.data.agencyId) 
+                                    && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) 
                                     && isSubscribed();
     }
     
@@ -75,7 +74,7 @@ service cloud.firestore {
     match /followups/{followupId} {
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
       allow create, update, delete: if isAuthenticated() 
-                                    && isSameAgency(request.resource.data.agencyId) 
+                                    && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) 
                                     && isSubscribed();
     }
 
