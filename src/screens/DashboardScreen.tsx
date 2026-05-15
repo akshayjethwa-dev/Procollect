@@ -1,4 +1,4 @@
-import { useEffect, useState, ReactNode } from 'react';
+import { useEffect, useState, useMemo, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { 
   TrendingUp, 
@@ -10,125 +10,178 @@ import {
   Clock, 
   ChevronRight,
   IndianRupee,
-  Bell
+  Bell,
+  Activity
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
 import { formatCurrency, cn, calculateDaysOverdue } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
-export default function DashboardScreen() {
-  const [stats, setStats] = useState({
-    todayDue: 0,
-    pendingFollowups: 0,
-    missedFollowups: 0, // NEW STAT: Tracks rolled-over/overdue tasks
-    completedToday: 0,
-    totalCollected: 0,
-    totalPending: 0,
-    missed: 0,
-    overdue0to7: 0,
-    overdue8to30: 0,
-    overdue30plus: 0
-  });
+// Ultra-robust Date Checker (Handles Timezones perfectly by comparing local calendar days)
+const isDateInFilter = (dateString: string | undefined, filter: string) => {
+  if (!dateString) return false;
+  
+  const targetDate = new Date(dateString);
+  const today = new Date();
+  
+  // Normalize to purely local midnight dates
+  const targetDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  const currentDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-  const [recentCustomers, setRecentCustomers] = useState<any[]>([]);
+  const diffTime = currentDay.getTime() - targetDay.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+  if (filter === 'today') return diffDays === 0;
+  if (filter === 'yesterday') return diffDays === 1;
+  if (filter === 'week') return diffDays >= 0 && diffDays <= today.getDay();
+  if (filter === 'month') return targetDate.getMonth() === today.getMonth() && targetDate.getFullYear() === today.getFullYear();
+  if (filter === 'all') return true;
+  
+  return false;
+};
+
+export default function DashboardScreen() {
+  // Raw Data States
+  const [allCustomers, setAllCustomers] = useState<any[]>([]);
+  const [allTasks, setAllTasks] = useState<any[]>([]);
+  const [allInteractions, setAllInteractions] = useState<any[]>([]); 
+  
+  // UI States
+  const [dateFilter, setDateFilter] = useState('today');
 
   useEffect(() => {
     if (!auth.currentUser) return;
+    const agentId = auth.currentUser.uid;
 
-    // Listen to customers for real-time stats
-    const qCustomers = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
+    // Listen to customers (Used for portfolio totals and ageing buckets)
+    const qCustomers = query(collection(db, 'customers'), where('assignedAgentId', '==', agentId));
     const unsubCustomers = onSnapshot(qCustomers, (snap) => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-      
-      const newStats = docs.reduce((acc, doc) => {
-        const received = Number(doc.receivedAmount) || 0;
-        const due = Number(doc.dueAmount) || 0;
-        const status = doc.status?.toLowerCase();
-        
-        acc.totalCollected += received;
-
-        if (status === 'pending' || !status) {
-          acc.todayDue += 1;
-          acc.totalPending += due;
-        } else if (status === 'full payment') {
-          acc.completedToday += 1;
-        } else if (status === 'partial payment' || status === 'promise to pay') {
-          acc.totalPending += due;
-        }
-        
-        if (status !== 'full payment') {
-          const daysOverdue = calculateDaysOverdue(doc.dueDate);
-          if (daysOverdue >= 1 && daysOverdue <= 7) acc.overdue0to7 += 1;
-          else if (daysOverdue >= 8 && daysOverdue <= 30) acc.overdue8to30 += 1;
-          else if (daysOverdue > 30) acc.overdue30plus += 1;
-        }
-
-        return acc;
-      }, {
-        todayDue: 0,
-        pendingFollowups: stats.pendingFollowups, 
-        missedFollowups: stats.missedFollowups, 
-        completedToday: 0,
-        totalCollected: 0,
-        totalPending: 0,
-        missed: 0,
-        overdue0to7: 0,
-        overdue8to30: 0,
-        overdue30plus: 0
-      });
-
-      setStats(prev => ({ ...prev, ...newStats }));
-      setRecentCustomers(docs.filter(d => d.status !== 'Full Payment').slice(0, 3));
+      setAllCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'customers_stats');
     });
 
-    // Listen to followups for EXACT "Today" count and "Missed/Rolled-over" count
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Listen to tasks (Used for pending/missed follow-ups)
     const qFollowups = query(
       collection(db, 'followups'), 
-      where('agentId', '==', auth.currentUser.uid),
+      where('agentId', '==', agentId),
       where('completed', '==', false)
     );
-    
     const unsubFollowups = onSnapshot(qFollowups, (snap) => {
-      const docs = snap.docs.map(d => d.data());
-      
-      let todayCount = 0;
-      let missedCount = 0;
-
-      docs.forEach(f => {
-        if (!f.scheduledAt) return;
-        const taskDate = f.scheduledAt.split('T')[0];
-        
-        // Count today's standard tasks
-        if (taskDate === todayStr) todayCount++;
-        
-        // Count as missed if it was from the past OR if the cloud function rolled it over to today
-        if (taskDate < todayStr || (f.rescheduledCount && f.rescheduledCount > 0)) {
-          missedCount++;
-        }
-      });
-
-      setStats(prev => ({ ...prev, pendingFollowups: todayCount, missedFollowups: missedCount }));
+      setAllTasks(snap.docs.map(d => d.data()));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'followups_stats');
+    });
+
+    // Listen to interactions (Used for highly accurate daily financial collections)
+    const qInteractions = query(
+      collection(db, 'interactions'),
+      where('agentId', '==', agentId)
+    );
+    const unsubInteractions = onSnapshot(qInteractions, (snap) => {
+      setAllInteractions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => {
+      console.error("Failed to fetch interactions:", error);
     });
 
     return () => {
       unsubCustomers();
       unsubFollowups();
+      unsubInteractions();
     };
-  }, [auth.currentUser]);
+  }, []);
+
+  // Compute stats dynamically
+  const stats = useMemo(() => {
+    const result = {
+      activeCases: 0,
+      totalPending: 0,
+      collectedInPeriod: 0,
+      visitsInPeriod: 0,
+      pendingFollowups: 0,
+      missedFollowups: 0,
+      overdue0to7: 0,
+      overdue8to30: 0,
+      overdue30plus: 0
+    };
+
+    // 1. Portfolio Totals (This is the CURRENT SNAPSHOT)
+    // The "due" amount here is already deducted if they made a payment.
+    allCustomers.forEach(doc => {
+      const due = Number(doc.totalDueAmount !== undefined ? doc.totalDueAmount : (doc.dueAmount || 0));
+      const status = doc.status?.toLowerCase();
+
+      if (status === 'pending' || !status || status === 'partial payment' || status === 'promise to pay') {
+        result.totalPending += due;
+        result.activeCases += 1;
+      }
+      
+      // Ageing Buckets
+      if (status !== 'full payment') {
+        const daysOverdue = calculateDaysOverdue(doc.dueDate);
+        if (daysOverdue >= 1 && daysOverdue <= 7) result.overdue0to7 += 1;
+        else if (daysOverdue >= 8 && daysOverdue <= 30) result.overdue8to30 += 1;
+        else if (daysOverdue > 30) result.overdue30plus += 1;
+      }
+    });
+
+    // 2. Period Collections & Visits 
+    if (dateFilter === 'all') {
+      // For "All-Time", rely directly on the customer profiles so we don't miss legacy collections
+      allCustomers.forEach(doc => {
+        const received = Number(doc.totalReceivedAmount !== undefined ? doc.totalReceivedAmount : (doc.receivedAmount || 0));
+        result.collectedInPeriod += received;
+      });
+      result.visitsInPeriod = allInteractions.length;
+    } else {
+      // For specific dates (Today, Yesterday, Week), rely on precise interaction logs
+      allInteractions.forEach(interaction => {
+        if (isDateInFilter(interaction.timestamp, dateFilter)) {
+          result.visitsInPeriod += 1;
+          
+          if (interaction.type === 'payment' && interaction.amount) {
+            result.collectedInPeriod += Number(interaction.amount);
+          }
+        }
+      });
+    }
+
+    // 3. Task Metrics
+    const todayStr = new Date().toISOString().split('T')[0];
+    allTasks.forEach(f => {
+      if (!f.scheduledAt) return;
+      const taskDate = f.scheduledAt.split('T')[0];
+      
+      if (taskDate === todayStr) result.pendingFollowups++;
+      if (taskDate < todayStr || (f.rescheduledCount && f.rescheduledCount > 0)) {
+        result.missedFollowups++;
+      }
+    });
+
+    return result;
+  }, [allCustomers, allTasks, allInteractions, dateFilter]);
+
+  const recentCustomers = allCustomers.filter(d => d.status !== 'Full Payment').slice(0, 3);
+
+  const getFilterLabel = () => {
+    switch(dateFilter) {
+      case 'today': return "Collected Today";
+      case 'yesterday': return "Collected Yesterday";
+      case 'week': return "Collected This Week";
+      case 'month': return "Collected This Month";
+      case 'all': return "All-Time Collections";
+      default: return "Collections";
+    }
+  };
 
   return (
     <div className="p-6 space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Hello, {auth.currentUser?.displayName?.split(' ')[0]}</h1>
-          <p className="text-sm text-slate-500 font-medium">Ready for today's collection?</p>
+          <h1 className="text-2xl font-bold text-slate-900">Hello, {auth.currentUser?.displayName?.split(' ')[0] || 'Agent'}</h1>
+          <p className="text-sm text-slate-500 font-medium">Ready for your collections?</p>
         </div>
         <Link to="/notifications" className="relative w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-600 android-shadow">
           <Bell size={24} />
@@ -136,11 +189,29 @@ export default function DashboardScreen() {
         </Link>
       </div>
 
+      {/* Date Filter Selection */}
+      <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none mt-2">
+        {['today', 'yesterday', 'week', 'month', 'all'].map(f => (
+          <button
+            key={f}
+            onClick={() => setDateFilter(f)}
+            className={cn(
+              "px-4 py-2 rounded-xl text-xs font-bold capitalize whitespace-nowrap transition-all border",
+              dateFilter === f 
+                ? "bg-brand-600 text-white border-brand-600 shadow-md shadow-brand-100" 
+                : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+            )}
+          >
+            {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
+          </button>
+        ))}
+      </div>
+
       {/* Main Stats Grid */}
       <div className="grid grid-cols-2 gap-4">
         <StatCard 
-          label="Today's Due" 
-          value={stats.todayDue} 
+          label="Active Cases" 
+          value={stats.activeCases} 
           icon={<IndianRupee className="text-brand-600" />} 
           color="bg-brand-50"
         />
@@ -174,32 +245,33 @@ export default function DashboardScreen() {
 
       {/* Performance Summary Card */}
       <div className="bg-brand-900 rounded-3xl p-6 text-white overflow-hidden relative shadow-xl shadow-brand-100">
-        <div className="relative z-10 space-y-4">
+        <div className="relative z-10 space-y-6">
           <div className="flex items-center justify-between">
-            <span className="text-brand-300 text-xs font-bold uppercase tracking-widest">Today's Progress</span>
+            <span className="text-brand-300 text-xs font-bold uppercase tracking-widest">{getFilterLabel()}</span>
             <div className="flex items-center space-x-1 text-emerald-400 bg-white/10 px-2 py-1 rounded-lg">
-              <TrendingUp size={12} />
-              <span className="text-[10px] font-bold">+12%</span>
+              <Activity size={12} />
+              <span className="text-[10px] font-bold">Live Data</span>
             </div>
           </div>
           
           <div className="space-y-1">
-            <h3 className="text-3xl font-bold">{formatCurrency(stats.totalCollected)}</h3>
-            <p className="text-brand-300 text-xs font-medium">Collected out of {formatCurrency(stats.totalCollected + stats.totalPending)}</p>
+            <h3 className="text-3xl font-bold">{formatCurrency(stats.collectedInPeriod)}</h3>
+            <p className="text-brand-300 text-xs font-medium">Logged across {stats.visitsInPeriod} customer interactions</p>
           </div>
 
-          <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-            <motion.div 
-              initial={{ width: 0 }}
-              animate={{ width: stats.totalCollected > 0 ? `${Math.min(100, (stats.totalCollected / (stats.totalCollected + stats.totalPending || 1)) * 100)}%` : "0%" }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              className="h-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-            />
+          <div className="border-t border-white/10 pt-4 flex justify-between items-center">
+             <div>
+                <p className="text-[9px] text-brand-300 font-bold uppercase tracking-widest">Current Remaining Balance</p>
+                <p className="font-bold text-lg">{formatCurrency(stats.totalPending)}</p>
+             </div>
+             <div className="text-right">
+                <p className="text-[9px] text-brand-300 font-bold uppercase tracking-widest">Pending Portfolio</p>
+             </div>
           </div>
         </div>
         
         {/* Decorative elements */}
-        <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-brand-800 rounded-full blur-3xl opacity-50" />
+        <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-brand-800 rounded-full blur-3xl opacity-50 pointer-events-none" />
       </div>
 
       {/* OVERDUE AGEING BUCKETS */}

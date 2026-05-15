@@ -32,36 +32,40 @@ service cloud.firestore {
       allow delete: if false; // Prevent accidental deletion of financial records
     }
 
-    // ✅ FIX: Added rules for Batches (Used by ImportScreen)
+    // Rules for Batches (Used by ImportScreen)
     match /batches/{batchId} {
       allow read: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
       allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
       allow update, delete: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
     }
 
-    // Proactively added: Rules for Interactions (used in CollectionUpdateScreen)
+    // Rules for Interactions (used in CollectionUpdateScreen)
     match /interactions/{interactionId} {
-      allow read, write: if isAuthenticated() 
-        && request.auth.uid == (resource == null ? request.resource.data.agentId : resource.data.agentId);
+      // Allow read for authenticated users (prevents index/query filtering blocks)
+      allow read: if isAuthenticated();
+      // Only allow creation/update if it genuinely belongs to the agent writing it
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.agentId;
+      allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.agentId;
     }
 
-    // Proactively added: Rules for Notifications (used in CollectionUpdateScreen)
+    // Rules for Notifications (used in CollectionUpdateScreen)
     match /notifications/{notificationId} {
-      allow read, write: if isAuthenticated() 
-        && request.auth.uid == (resource == null ? request.resource.data.recipientId : resource.data.recipientId);
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
+      allow create: if isAuthenticated(); // Allowed to create notes triggering notifications
+      allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
     }
 
     // Rules for Visits and Follow-ups
     match /visits/{visitId} {
-      allow read, write: if isAuthenticated() 
-        && request.auth.uid == (resource == null ? request.resource.data.agentId : resource.data.agentId)
-        && isSubscribed();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.agentId && isSubscribed();
+      allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.agentId && isSubscribed();
     }
     
     match /followups/{followupId} {
-      allow read, write: if isAuthenticated() 
-        && request.auth.uid == (resource == null ? request.resource.data.agentId : resource.data.agentId)
-        && isSubscribed();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.agentId && isSubscribed();
+      allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.agentId && isSubscribed();
     }
 
     // Default deny

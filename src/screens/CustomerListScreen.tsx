@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Search, Filter, Phone, MessageSquare, MapPin, ChevronRight, User, Layers, AlertCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { auth, db, collection, query, onSnapshot, where } from '../lib/firebase';
 import { formatCurrency, cn, calculateDaysOverdue, getAgeingBucket } from '../lib/utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
@@ -20,6 +20,8 @@ export default function CustomerListScreen() {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [selectedBatch, setSelectedBatch] = useState('all');
+  
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!db || !auth.currentUser) return;
@@ -153,11 +155,11 @@ export default function CustomerListScreen() {
           const isOverdue = daysOverdue > 0 && customer.status !== 'Full Payment';
 
           return (
-            <Link 
-              to={`/customers/${customer.id}`} 
+            <div 
               key={customer.id} 
+              onClick={() => navigate(`/customers/${customer.id}`)}
               className={cn(
-                "premium-card p-4 block active:scale-[0.98] transition-transform",
+                "premium-card p-4 block cursor-pointer active:scale-[0.98] transition-transform",
                 isOverdue && "border-l-4 border-l-red-500"
               )}
             >
@@ -224,7 +226,7 @@ export default function CustomerListScreen() {
                   <ChevronRight size={20} />
                 </div>
               </div>
-            </Link>
+            </div>
           );
         })}
         {filtered.length === 0 && (

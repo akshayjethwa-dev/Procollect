@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { auth, db, doc, getDoc, updateDoc, collection, addDoc } from '../lib/firebase';
-import { ChevronLeft, IndianRupee, Calendar, CheckCircle2, AlertCircle, Camera, Clock } from 'lucide-react';
+import { auth, db, doc, getDoc, updateDoc, collection, addDoc, query, where, orderBy, getDocs, limit } from '../lib/firebase';
+import { ChevronLeft, IndianRupee, Calendar, CheckCircle2, AlertCircle, Camera, Clock, History, MapPin, Image as ImageIcon } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { uploadFieldDocument } from '../lib/storage';
 
 const STATUS_OPTIONS = [
   { id: 'Full Payment', label: 'Full Payment', color: 'bg-emerald-500' },
@@ -30,6 +31,18 @@ export default function CollectionUpdateScreen() {
   const [saving, setSaving] = useState(false);
   const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
 
+  // Proof upload states
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [uploadingSelfie, setUploadingSelfie] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // History states
+  const [history, setHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  // Fetch customer profile
   useEffect(() => {
     if (id) {
       getDoc(doc(db, 'customers', id))
@@ -51,6 +64,57 @@ export default function CollectionUpdateScreen() {
     }
   }, [id]);
 
+  // Fetch visit history independently (AC4)
+  useEffect(() => {
+    if (id) {
+      const fetchHistory = async () => {
+        setLoadingHistory(true);
+        try {
+          const historyQuery = query(
+            collection(db, 'interactions'),
+            where('customerId', '==', id),
+            orderBy('timestamp', 'desc'),
+            limit(10) // Show last 10 interactions
+          );
+          const snapshot = await getDocs(historyQuery);
+          setHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        } catch (error) {
+          console.error("Error fetching visit history:", error);
+        } finally {
+          setLoadingHistory(false);
+        }
+      };
+      fetchHistory();
+    }
+  }, [id]);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'receipt' | 'selfie') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadError(null);
+    if (type === 'receipt') setUploadingReceipt(true);
+    else setUploadingSelfie(true);
+
+    try {
+      const result = await uploadFieldDocument(file);
+      if (type === 'receipt') {
+        setReceiptUrl(result.url);
+      } else {
+        setSelfieUrl(result.url);
+      }
+    } catch (err: any) {
+      console.error(`Error uploading ${type}:`, err);
+      setUploadError(`Failed to upload ${type}. Please try again.`);
+    } finally {
+      if (type === 'receipt') setUploadingReceipt(false);
+      else setUploadingSelfie(false);
+      
+      // Reset input value so the same file can be uploaded again if needed
+      e.target.value = '';
+    }
+  };
+
   const handleUpdate = async () => {
     if (!id || !selectedStatus || !customer) return;
     setSaving(true);
@@ -62,7 +126,7 @@ export default function CollectionUpdateScreen() {
         lastVisitNotes: notes,
       };
 
-      // Determine the display due amount (handling both new aggregate and legacy fields)
+      // Determine the display due amount
       const currentDue = customer.totalDueAmount !== undefined ? customer.totalDueAmount : (customer.dueAmount || 0);
       const currentReceived = customer.totalReceivedAmount !== undefined ? customer.totalReceivedAmount : (customer.receivedAmount || 0);
 
@@ -83,24 +147,23 @@ export default function CollectionUpdateScreen() {
         if (nextDate) updateData.nextFollowUp = nextDate;
       }
 
-      // Update customer document directly
       await updateDoc(doc(db, 'customers', id), updateData);
       
-      // Create interaction record
       await addDoc(collection(db, 'interactions'), {
         customerId: id,
         customerName: customer.name,
-        loanId: customer.loanId || 'N/A', // Track the loan ID
+        loanId: customer.loanId || 'N/A',
         agentId: auth.currentUser?.uid,
         type: selectedStatus.toLowerCase().includes('payment') ? 'payment' : 'visit',
         status: selectedStatus,
         amount: amount ? parseFloat(amount) : (selectedStatus === 'Full Payment' ? currentDue : 0),
         notes,
+        receiptUrl,
+        selfieUrl,
         timestamp: isoTimestamp,
         location: location || null
       });
 
-      // Create follow-up if needed
       if (nextDate && (selectedStatus === 'Partial Payment' || selectedStatus === 'Promise to Pay')) {
         await addDoc(collection(db, 'followups'), {
           customerId: id,
@@ -115,7 +178,6 @@ export default function CollectionUpdateScreen() {
           timestamp: isoTimestamp
         });
 
-        // Add a notification for the agent
         await addDoc(collection(db, 'notifications'), {
           recipientId: auth.currentUser?.uid,
           title: `Follow-up set: ${customer.name}`,
@@ -145,7 +207,6 @@ export default function CollectionUpdateScreen() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-50">
       <div className="bg-brand-600 text-white p-6 pt-12 rounded-b-[2.5rem] shadow-lg relative overflow-hidden">
-        {/* Background Pattern */}
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
         
         <button onClick={() => navigate(-1)} className="mb-6 flex items-center space-x-2 text-brand-100 font-bold uppercase text-[10px] tracking-widest hover:text-white transition-colors relative z-10">
@@ -197,14 +258,14 @@ export default function CollectionUpdateScreen() {
         <AnimatePresence mode="wait">
           {selectedStatus && (
             <motion.div
-              key={selectedStatus} // Ensures animation triggers smoothly when changing status
+              key={selectedStatus}
               initial={{ height: 0, opacity: 0, y: 10 }}
               animate={{ height: "auto", opacity: 1, y: 0 }}
               exit={{ height: 0, opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
               className="overflow-hidden space-y-6 origin-top"
             >
-              <div className="premium-card p-6 space-y-6 bg-white border border-slate-100">
+              <div className="premium-card p-6 space-y-6 bg-white border border-slate-100 rounded-3xl">
                 {(selectedStatus === 'Partial Payment' || selectedStatus === 'Full Payment') && (
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase">Amount Collected</label>
@@ -247,22 +308,73 @@ export default function CollectionUpdateScreen() {
                   />
                 </div>
 
+                {uploadError && (
+                  <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-xs font-bold flex items-center space-x-2">
+                    <AlertCircle size={16} />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl text-slate-400 space-y-1 border border-slate-100 cursor-pointer active:bg-slate-100 hover:bg-slate-100/50 transition-colors">
-                    <Camera size={20} className="text-brand-500" />
-                    <span className="text-[10px] font-bold uppercase text-slate-500 mt-1">Receipt</span>
-                    <input type="file" accept="image/*" className="hidden" onChange={() => alert("Proof captured locally and will sync.")} />
+                  <label className="relative h-24 flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl text-slate-400 space-y-1 border border-slate-100 cursor-pointer overflow-hidden active:bg-slate-100 hover:bg-slate-100/50 transition-colors">
+                    {receiptUrl && (
+                      <div className="absolute inset-0 bg-slate-900/10 z-0">
+                        <img src={receiptUrl} alt="Receipt Proof" className="w-full h-full object-cover opacity-60" />
+                      </div>
+                    )}
+                    <div className="relative z-10 flex flex-col items-center drop-shadow-md">
+                      {uploadingReceipt ? (
+                        <Clock size={20} className="text-brand-500 animate-spin" />
+                      ) : receiptUrl ? (
+                        <CheckCircle2 size={20} className="text-emerald-500" />
+                      ) : (
+                        <Camera size={20} className="text-brand-500" />
+                      )}
+                      <span className={cn("text-[10px] font-bold uppercase mt-1", receiptUrl ? "text-emerald-700" : "text-slate-600")}>
+                        {uploadingReceipt ? 'Uploading...' : receiptUrl ? 'Receipt Added' : 'Receipt'}
+                      </span>
+                    </div>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => handleImageUpload(e, 'receipt')}
+                      disabled={uploadingReceipt || uploadingSelfie} 
+                    />
                   </label>
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl text-slate-400 space-y-1 border border-slate-100 cursor-pointer active:bg-slate-100 hover:bg-slate-100/50 transition-colors">
-                    <Camera size={20} className="text-brand-500" />
-                    <span className="text-[10px] font-bold uppercase text-slate-500 mt-1">Selfie</span>
-                    <input type="file" accept="image/*" capture="user" className="hidden" onChange={() => alert("Selfie captured.")} />
+
+                  <label className="relative h-24 flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl text-slate-400 space-y-1 border border-slate-100 cursor-pointer overflow-hidden active:bg-slate-100 hover:bg-slate-100/50 transition-colors">
+                    {selfieUrl && (
+                      <div className="absolute inset-0 bg-slate-900/10 z-0">
+                        <img src={selfieUrl} alt="Selfie Proof" className="w-full h-full object-cover opacity-60" />
+                      </div>
+                    )}
+                    <div className="relative z-10 flex flex-col items-center drop-shadow-md">
+                      {uploadingSelfie ? (
+                        <Clock size={20} className="text-brand-500 animate-spin" />
+                      ) : selfieUrl ? (
+                        <CheckCircle2 size={20} className="text-emerald-500" />
+                      ) : (
+                        <Camera size={20} className="text-brand-500" />
+                      )}
+                      <span className={cn("text-[10px] font-bold uppercase mt-1", selfieUrl ? "text-emerald-700" : "text-slate-600")}>
+                        {uploadingSelfie ? 'Uploading...' : selfieUrl ? 'Selfie Added' : 'Selfie'}
+                      </span>
+                    </div>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      capture="user" 
+                      className="hidden" 
+                      onChange={(e) => handleImageUpload(e, 'selfie')}
+                      disabled={uploadingReceipt || uploadingSelfie} 
+                    />
                   </label>
                 </div>
 
                 <button 
                   onClick={handleUpdate}
-                  disabled={saving || (selectedStatus === 'Partial Payment' && !amount)}
+                  disabled={saving || uploadingReceipt || uploadingSelfie || (selectedStatus === 'Partial Payment' && !amount)}
                   className="w-full bg-brand-600 text-white p-5 rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-brand-100 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-transform"
                 >
                   {saving ? <Clock className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
@@ -272,6 +384,88 @@ export default function CollectionUpdateScreen() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Visit History Section (AC1) */}
+        <div className="pt-8 border-t border-slate-200 mt-8 space-y-4">
+          <h2 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
+            <History className="text-brand-500" size={20} />
+            <span>Visit History</span>
+          </h2>
+          
+          {loadingHistory ? (
+            <div className="text-center p-6 text-slate-400 flex flex-col items-center space-y-2">
+              <Clock className="animate-spin" size={24} />
+              <span className="text-sm font-medium">Loading previous visits...</span>
+            </div>
+          ) : history.length === 0 ? (
+            <div className="text-center p-6 bg-slate-100/50 rounded-2xl border border-slate-100 text-slate-500 text-sm font-medium">
+              No previous visits recorded for this customer.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {history.map((item) => (
+                <div key={item.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        {new Date(item.timestamp).toLocaleDateString()} • {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <p className="text-sm font-bold text-slate-800 mt-0.5">{item.status}</p>
+                    </div>
+                    {item.amount > 0 && (
+                      <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg text-sm">
+                        {formatCurrency(item.amount)}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {item.notes && (
+                    <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100/50">
+                      {item.notes}
+                    </p>
+                  )}
+                  
+                  {/* Action Links (AC2 & AC3) */}
+                  {(item.location || item.receiptUrl || item.selfieUrl) && (
+                    <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-50 mt-1">
+                      {item.location && (
+                        <a 
+                          href={`https://maps.google.com/?q=${item.location.lat},${item.location.lng}`} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-brand-600 bg-brand-50 px-2.5 py-1.5 rounded-lg hover:bg-brand-100 transition-colors"
+                        >
+                          <MapPin size={12} /> Map Location
+                        </a>
+                      )}
+                      {item.receiptUrl && (
+                        <a 
+                          href={item.receiptUrl} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors"
+                        >
+                          <ImageIcon size={12} /> View Receipt
+                        </a>
+                      )}
+                      {item.selfieUrl && (
+                        <a 
+                          href={item.selfieUrl} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+                        >
+                          <ImageIcon size={12} /> View Selfie
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

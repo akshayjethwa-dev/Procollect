@@ -5,7 +5,7 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { auth, db, doc, onSnapshot, query, collection, where, User, getDocFromCache, getDocFromServer } from './lib/firebase';
+import { auth, User } from './lib/firebase';
 
 import SplashScreen from './screens/SplashScreen';
 import LoginScreen from './screens/LoginScreen';
@@ -26,22 +26,12 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
-    // Stability check for pilot
-    const checkConnection = async () => {
-      try {
-        await getDocFromServer(doc(db, 'test-connection', 'ping'));
-      } catch (e) {
-        console.warn("Connection check failed, might be offline or first load:", e);
-      }
-    };
-    checkConnection();
-
     const unsub = auth.onAuthStateChanged((u) => {
       setUser(u);
       setLoading(false);
     });
     
-    // Show splash for at least 2 seconds
+    // Show splash for at least 2.5 seconds
     const timer = setTimeout(() => setShowSplash(false), 2500);
     
     return () => {
