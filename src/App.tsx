@@ -3,12 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { auth, User, getIdTokenResult, db, doc, getDoc } from './lib/firebase';
 
 import SplashScreen from './screens/SplashScreen';
 import LoginScreen from './screens/LoginScreen';
+import SignupScreen from './screens/SignupScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import CustomerListScreen from './screens/CustomerListScreen';
 import ImportScreen from './screens/ImportScreen';
@@ -21,9 +22,36 @@ import NotificationsScreen from './screens/NotificationsScreen';
 import CheckoutScreen from './screens/CheckoutScreen';
 import Layout from './components/Layout';
 
-// Placeholder Admin components
-const AdminLayout = () => <div className="admin-layout"><Outlet /></div>;
-const AdminDashboardScreen = () => <div className="p-8 font-bold text-2xl">Manager Dashboard</div>;
+// NEW IMPORTS
+import AgentManagementScreen from './screens/Admin/AgentManagementScreen';
+import { Shield, Users, LogOut } from 'lucide-react';
+
+// Basic Admin Layout implementation for Manager navigation
+const AdminLayout = () => (
+  <div className="min-h-screen bg-gray-50 flex">
+    {/* Admin Sidebar */}
+    <aside className="w-64 bg-slate-900 text-white hidden md:flex flex-col">
+      <div className="p-6 border-b border-slate-800">
+        <h2 className="text-xl font-bold flex items-center gap-2"><Shield size={20} className="text-blue-400" /> Manager Portal</h2>
+      </div>
+      <nav className="flex-1 p-4 space-y-2">
+        <Link to="/admin/dashboard" className="block px-4 py-2 rounded hover:bg-slate-800 transition">Dashboard</Link>
+        <Link to="/admin/agents" className="flex items-center gap-2 px-4 py-2 rounded hover:bg-slate-800 transition"><Users size={18} /> Manage Agents</Link>
+      </nav>
+      <div className="p-4 border-t border-slate-800">
+        <button onClick={() => auth.signOut()} className="flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 w-full">
+          <LogOut size={18} /> Logout
+        </button>
+      </div>
+    </aside>
+    {/* Main Content */}
+    <main className="flex-1 overflow-auto">
+      <Outlet />
+    </main>
+  </div>
+);
+
+const AdminDashboardScreen = () => <div className="p-8 font-bold text-2xl text-gray-800">Manager Dashboard</div>;
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -35,11 +63,9 @@ export default function App() {
     const unsub = auth.onAuthStateChanged(async (u) => {
       if (u) {
         try {
-          // 1. Decode token to check for secure custom claims
           const tokenResult = await getIdTokenResult(u);
           let role = tokenResult.claims.role as 'manager' | 'agent' | undefined;
 
-          // 2. Dev Fallback: If no claim is found, check Firestore database
           if (!role) {
             const userDoc = await getDoc(doc(db, 'users', u.uid));
             if (userDoc.exists()) {
@@ -47,7 +73,7 @@ export default function App() {
             }
           }
 
-          setUserRole(role || 'agent'); // Default to agent if undefined
+          setUserRole(role || 'agent'); 
           setUser(u);
         } catch (error) {
           console.error("Error fetching user role:", error);
@@ -72,7 +98,6 @@ export default function App() {
   if (showSplash) return <SplashScreen />;
   if (loading) return null;
 
-  // FIXED: Standard agents are routed to '/dashboard', matching your Layout links
   const getInitialRoute = () => {
     return userRole === 'manager' ? '/admin/dashboard' : '/dashboard';
   };
@@ -80,10 +105,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public Routes */}
         <Route path="/login" element={!user ? <LoginScreen /> : <Navigate to={getInitialRoute()} />} />
-        
-        {/* Root Redirect */}
+        <Route path="/signup" element={!user ? <SignupScreen /> : <Navigate to={getInitialRoute()} />} />
         <Route path="/" element={user ? <Navigate to={getInitialRoute()} /> : <Navigate to="/login" />} />
 
         {/* ========================================== */}
@@ -93,7 +116,8 @@ export default function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" />} />
             <Route path="dashboard" element={<AdminDashboardScreen />} />
-            {/* Add future manager routes here */}
+            {/* NEW: Agent Management Route added here */}
+            <Route path="agents" element={<AgentManagementScreen />} />
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Route>
         )}
@@ -102,7 +126,7 @@ export default function App() {
         {/* AGENT ROUTES (Standard Layout)             */}
         {/* ========================================== */}
         {userRole === 'agent' && (
-          <Route path="/" element={<Layout />}> {/* FIXED: Reverted path back to "/" */}
+          <Route path="/" element={<Layout />}> 
             <Route index element={<Navigate to="dashboard" />} />
             <Route path="dashboard" element={<DashboardScreen />} />
             <Route path="customers" element={<CustomerListScreen />} />

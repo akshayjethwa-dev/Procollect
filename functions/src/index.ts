@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { onDocumentWritten } from "firebase-functions/v2/firestore"; // <-- Added Import
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 
 admin.initializeApp();
@@ -134,7 +134,7 @@ export const exportPerformanceReport = onCall(async (request) => {
   };
 });
 
-// --- NEW: Sync Firestore User Role to Auth Custom Claims ---
+// --- Sync Firestore User Role to Auth Custom Claims ---
 export const syncUserRoleToCustomClaims = onDocumentWritten("users/{userId}", async (event) => {
   const userId = event.params.userId;
   
@@ -166,5 +166,105 @@ export const syncUserRoleToCustomClaims = onDocumentWritten("users/{userId}", as
     } catch (error) {
       console.error(`Failed to set custom claims for user ${userId}:`, error);
     }
+  }
+});
+
+
+// ==========================================
+// NEW: AGENT MANAGEMENT FUNCTIONS
+// ==========================================
+
+export const createAgentAccount = onCall(async (request) => {
+  // 1. Verify caller is authenticated
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'You must be logged in to provision an agent.');
+  }
+
+  // 2. Verify caller has Manager permissions
+  const callerId = request.auth.uid;
+  const callerRecord = await admin.auth().getUser(callerId);
+  if (callerRecord.customClaims?.role !== 'manager') {
+    throw new HttpsError('permission-denied', 'Only managers can provision new agents.');
+  }
+
+  const { name, phone, password } = request.data;
+  if (!name || !phone || !password) {
+    throw new HttpsError('invalid-argument', 'Name, phone, and password are required.');
+  }
+
+  // 3. Generate Agent ID and dummy login email
+  const generatedId = `AGT-${Math.floor(10000 + Math.random() * 90000)}`;
+  const loginEmail = `${generatedId.toLowerCase()}@procollect.local`; 
+  
+  // Fallback to manager's UID if agencyId isn't explicitly set yet
+  const managerAgencyId = callerRecord.customClaims?.agencyId || callerId; 
+
+  try {
+    // 4. Create Auth User
+    const userRecord = await admin.auth().createUser({
+      email: loginEmail,
+      password: password,
+      displayName: name,
+    });
+
+    // 5. Set Custom Claims instantly
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+      role: 'agent',
+      agencyId: managerAgencyId
+    });
+
+    // 6. Create Firestore Profile
+    await admin.firestore().collection('users').doc(userRecord.uid).set({
+      name,
+      phone,
+      agentId: generatedId,
+      email: loginEmail, // Store login email so it can be displayed in UI
+      role: 'agent',
+      agencyId: managerAgencyId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      active: true
+    });
+
+    return { 
+      uid: userRecord.uid, 
+      agentId: generatedId,
+      email: loginEmail,
+      message: "Agent created successfully." 
+    };
+  } catch (error: any) {
+    console.error("Error creating agent:", error);
+    throw new HttpsError('internal', error.message || 'Failed to create agent');
+  }
+});
+
+export const resetAgentPassword = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Not logged in');
+  }
+
+  const callerRecord = await admin.auth().getUser(request.auth.uid);
+  if (callerRecord.customClaims?.role !== 'manager') {
+    throw new HttpsError('permission-denied', 'Only managers can reset passwords.');
+  }
+  
+  const { uid, newPassword } = request.data;
+  if (!uid || !newPassword) {
+    throw new HttpsError('invalid-argument', 'Missing user ID or new password');
+  }
+
+  try {
+    // Security check: Ensure agent belongs to this manager's agency
+    const agentRecord = await admin.auth().getUser(uid);
+    const managerAgencyId = callerRecord.customClaims?.agencyId || request.auth.uid;
+    
+    if (agentRecord.customClaims?.agencyId !== managerAgencyId) {
+      throw new HttpsError('permission-denied', 'Cannot modify an agent outside your agency.');
+    }
+
+    await admin.auth().updateUser(uid, { password: newPassword });
+    return { message: "Password updated successfully" };
+  } catch (error: any) {
+    console.error("Error resetting password:", error);
+    throw new HttpsError('internal', 'Failed to reset password');
   }
 });
