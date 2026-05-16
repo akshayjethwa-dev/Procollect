@@ -67,7 +67,7 @@ export const db = initializeFirestore(app, {
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
 
-// NEW: Helper to get the user's agency ID from Custom Claims
+// Helper to get the user's agency ID from Custom Claims
 export const getUserAgencyId = async (): Promise<string | null> => {
   const user = auth.currentUser;
   if (!user) return null;
@@ -89,6 +89,7 @@ export {
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
+  getIdTokenResult, // <-- FIXED: Added this export
   collection,
   doc,
   getDoc,

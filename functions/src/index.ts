@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentWritten } from "firebase-functions/v2/firestore"; // <-- Added Import
 import * as admin from "firebase-admin";
 
 admin.initializeApp();
@@ -41,7 +42,7 @@ export const autoRescheduleFollowups = onSchedule("every day 00:01", async () =>
   console.log(`Successfully rescheduled ${count} missed followups to ${todayStr}.`);
 });
 
-// --- UPDATED: Export Performance Report Function ---
+// --- Export Performance Report Function ---
 export const exportPerformanceReport = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'You must be logged in to export data.');
@@ -54,7 +55,7 @@ export const exportPerformanceReport = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'You are not authorized to export this agent data.');
   }
 
-  // 1. Fetch ALL interactions for this agent (Avoids the Composite Index crash)
+  // 1. Fetch ALL interactions for this agent
   const query = admin.firestore().collection('interactions').where('agentId', '==', agentId);
   const snapshot = await query.get();
   
@@ -131,4 +132,39 @@ export const exportPerformanceReport = onCall(async (request) => {
     csvBase64: Buffer.from(summary).toString('base64'),
     fileName: `Performance_Report_${timeframe}.csv`
   };
+});
+
+// --- NEW: Sync Firestore User Role to Auth Custom Claims ---
+export const syncUserRoleToCustomClaims = onDocumentWritten("users/{userId}", async (event) => {
+  const userId = event.params.userId;
+  
+  // Get the data after the change
+  const afterData = event.data?.after.data();
+
+  // If the document was deleted, we don't need to do anything
+  if (!afterData) {
+    return;
+  }
+
+  const currentRole = afterData.role;
+  const beforeRole = event.data?.before?.data()?.role;
+
+  // Only proceed if the role exists and has actually changed to save execution time
+  if (currentRole && currentRole !== beforeRole) {
+    try {
+      // 1. Fetch existing claims so we don't overwrite other claims (like agencyId or isSubscribed)
+      const userRecord = await admin.auth().getUser(userId);
+      const currentClaims = userRecord.customClaims || {};
+
+      // 2. Set the new role claim along with existing claims
+      await admin.auth().setCustomUserClaims(userId, {
+        ...currentClaims,
+        role: currentRole
+      });
+
+      console.log(`Successfully updated custom claims for user ${userId} to role: ${currentRole}`);
+    } catch (error) {
+      console.error(`Failed to set custom claims for user ${userId}:`, error);
+    }
+  }
 });

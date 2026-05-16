@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, ShieldCheck, Languages, LogIn } from 'lucide-react';
+import { LogIn, ShieldCheck } from 'lucide-react';
 import { auth, db, doc, setDoc, getDoc, signInWithPopup, GoogleAuthProvider } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
@@ -12,10 +11,12 @@ export default function LoginScreen() {
     try {
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (!userDoc.exists()) {
+        // Initialize new users with a default 'agent' role
         await setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
           name: user.displayName || 'Agent',
           email: user.email || '',
+          role: 'agent', // <-- Default role assigned here
           createdAt: new Date().toISOString(),
         });
       }
