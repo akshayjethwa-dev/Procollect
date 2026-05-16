@@ -1,7 +1,8 @@
 // src/lib/firebase.ts
 /// <reference types="vite/client" />
 
-import { initializeApp } from 'firebase/app';
+// FIX 1: Added getApps and getApp to check for existing initialization
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
   signInWithPopup, 
@@ -12,6 +13,7 @@ import {
   getIdTokenResult
 } from 'firebase/auth';
 import { 
+  getFirestore, // FIX 2: Added getFirestore 
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
@@ -55,25 +57,45 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
+// FIX 3: HMR Safe App Initialization
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-});
+// FIX 4: HMR Safe Firestore Initialization
+// If it's the first load, initialize with offline cache. If HMR reloads, just get the existing instance.
+export const db = !getApps().length 
+  ? initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    })
+  : getFirestore(app);
 
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
 
-// Helper to get the user's agency ID from Custom Claims
-export const getUserAgencyId = async (): Promise<string | null> => {
+// Helper to get the user's agency ID from Custom Claims or Firestore fallback
+export const getUserAgencyId = async (): Promise<string> => {
   const user = auth.currentUser;
-  if (!user) return null;
+  if (!user) return 'UNASSIGNED';
   
-  const tokenResult = await getIdTokenResult(user);
-  return (tokenResult.claims.agencyId as string) || null;
+  try {
+    // 1. Check custom claims first
+    const tokenResult = await getIdTokenResult(user);
+    if (tokenResult.claims && tokenResult.claims.agencyId) {
+      return tokenResult.claims.agencyId as string;
+    }
+
+    // 2. Fallback to Firestore (helpful for dev or before claims sync)
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    if (userDoc.exists() && userDoc.data().agencyId) {
+      return userDoc.data().agencyId;
+    }
+  } catch (error) {
+    console.warn("Could not fetch agency ID, defaulting to UNASSIGNED", error);
+  }
+
+  return 'UNASSIGNED';
 };
 
 export const checkSubscriptionStatus = async (): Promise<boolean> => {
@@ -89,7 +111,7 @@ export {
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
-  getIdTokenResult, // <-- FIXED: Added this export
+  getIdTokenResult,
   collection,
   doc,
   getDoc,

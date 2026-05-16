@@ -88,7 +88,7 @@ export interface UserProfile {
   email: string;
   createdAt: string;
   photoURL?: string;
-  role?: 'admin' | 'agent'; // Useful for future role-based checks
+  role?: 'admin' | 'agency_manager' | 'agent'; // Useful for future role-based checks
 }
 
 // NEW: Cash Deposit Interface

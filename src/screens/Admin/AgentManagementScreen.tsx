@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { db, auth } from '../../lib/firebase';
+// FIX 1: Imported getUserAgencyId
+import { db, auth, getUserAgencyId } from '../../lib/firebase';
 import { UserPlus, Key, Shield, Copy, CheckCircle2, Wallet } from 'lucide-react';
-import { Link } from 'react-router-dom'; // <-- NEW IMPORT
+import { Link } from 'react-router-dom';
 
 export default function AgentManagementScreen() {
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   // Form States
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -25,15 +27,29 @@ export default function AgentManagementScreen() {
 
   const fetchAgents = async () => {
     setLoading(true);
+    setErrorMsg(null);
     try {
-      // Note: Ideally filter by agencyId if implemented. 
-      // For now, grabbing 'agent' role.
-      const q = query(collection(db, 'users'), where('role', '==', 'agent'));
+      // FIX 2: Get the current manager's agency ID
+      const agencyId = await getUserAgencyId() || 'UNASSIGNED';
+
+      // FIX 3: Filter the query to only show agents with matching agencyId
+      const q = query(
+        collection(db, 'users'), 
+        where('role', '==', 'agent'),
+        where('agencyId', '==', agencyId)
+      );
+      
       const snapshot = await getDocs(q);
       const agentsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAgents(agentsList);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching agents", error);
+      // Catch missing index errors explicitly
+      if (error.message.includes('index')) {
+        setErrorMsg('Firestore indexing required. Check your browser console for the link to build the index.');
+      } else {
+        setErrorMsg('Failed to load agents. Make sure you have the right permissions.');
+      }
     }
     setLoading(false);
   };
@@ -46,8 +62,10 @@ export default function AgentManagementScreen() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      // FIX 4: Send the current manager's agencyId to the cloud function
+      const agencyId = await getUserAgencyId() || 'UNASSIGNED';
       const createAgentFn = httpsCallable(functions, 'createAgentAccount');
-      const result = await createAgentFn({ name, phone, password });
+      const result = await createAgentFn({ name, phone, password, agencyId });
       
       const data = result.data as any;
       setNewCredentials({ email: data.email, pass: password });
@@ -91,8 +109,14 @@ export default function AgentManagementScreen() {
         </button>
       </div>
 
+      {errorMsg && (
+        <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-semibold border border-red-100">
+          {errorMsg}
+        </div>
+      )}
+
       {loading ? (
-        <p className="text-gray-500">Loading agents...</p>
+        <p className="text-gray-500">Loading your agents...</p>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <table className="w-full text-left border-collapse">
@@ -108,7 +132,6 @@ export default function AgentManagementScreen() {
               {agents.map((agent) => (
                 <tr key={agent.id} className="hover:bg-gray-50/50">
                   <td className="p-4 font-medium text-gray-800">
-                    {/* NEW: Agent name is now a clickable link to their ledger */}
                     <Link to={`/admin/agents/${agent.id}`} className="hover:text-blue-600 transition-colors">
                       {agent.name}
                     </Link>
@@ -116,7 +139,6 @@ export default function AgentManagementScreen() {
                   <td className="p-4 text-blue-600">{agent.email}</td>
                   <td className="p-4 text-gray-600">{agent.phone}</td>
                   <td className="p-4 flex items-center gap-4">
-                    {/* NEW: View Ledger Button */}
                     <Link 
                       to={`/admin/agents/${agent.id}`}
                       className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 transition-colors"
@@ -134,7 +156,7 @@ export default function AgentManagementScreen() {
                 </tr>
               ))}
               {agents.length === 0 && (
-                <tr><td colSpan={4} className="p-4 text-center text-gray-500">No agents found.</td></tr>
+                <tr><td colSpan={4} className="p-4 text-center text-gray-500">No agents found in your agency.</td></tr>
               )}
             </tbody>
           </table>

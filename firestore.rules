@@ -20,14 +20,24 @@ service cloud.firestore {
         (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
     }
 
-    // Rules for User Profiles
+    // =========================================================
+    // Rules for User Profiles (Strict Multi-Tenancy)
+    // =========================================================
     match /users/{userId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isAuthenticated() && (
+        // A user can read their own profile
+        request.auth.uid == userId || 
+        // OR an Admin/Manager can read profiles within their SAME agency
+        (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'admin'] &&
+          isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
+        )
+      );
+      allow write: if isAuthenticated() && request.auth.uid == userId;
     }
 
     // Rules for Customers
     match /customers/{customerId} {
-      // Agent can read if they own the record directly OR if they share the same agency
       allow read: if isAuthenticated() && (resource.data.assignedAgentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
       allow create: if isAuthenticated() 
                     && (request.resource.data.assignedAgentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')))
@@ -75,20 +85,11 @@ service cloud.firestore {
                                     && isSubscribed();
     }
 
-    // NEW: Rules for Cash Deposits
+    // Rules for Cash Deposits
     match /cashDeposits/{depositId} {
-      // Agents can create requests for themselves
-      allow create: if isAuthenticated() 
-                    && request.resource.data.agentId == request.auth.uid;
-      
-      // Agents can read their own; Managers can read everything in their agency
-      allow read: if isAuthenticated() 
-                  && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      
-      // Only Managers can update (Approve/Reject) within their own agency
-      allow update: if isAuthenticated() 
-                    && request.auth.token.role == 'agency_manager' 
-                    && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+      allow create: if isAuthenticated() && request.resource.data.agentId == request.auth.uid;
+      allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
+      allow update: if isAuthenticated() && request.auth.token.role == 'agency_manager' && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
     }
 
     // Default deny for all other collections

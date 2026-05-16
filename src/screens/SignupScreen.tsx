@@ -3,7 +3,6 @@ import { UserPlus, ShieldCheck, Mail, Lock, User, Phone, Eye, EyeOff } from 'luc
 import { auth, db, doc, setDoc } from '../lib/firebase';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { Link } from 'react-router-dom';
-import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
@@ -41,13 +40,13 @@ export default function SignupScreen() {
       await updateProfile(user, { displayName: name });
 
       // 3. Create Firestore User Document
-      // Self-registered users default to 'manager' so they can manage their own agency
+      // FIX: Default role changed from 'manager' to 'agent' per schema update
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         name: name,
         phone: phone,
         email: email,
-        role: 'manager', 
+        role: 'agent', // <--- Updated role
         createdAt: new Date().toISOString(),
         active: true
       });
@@ -71,7 +70,7 @@ export default function SignupScreen() {
           </div>
           <div>
             <h1 className="text-3xl font-black text-gray-900 tracking-tight">Create Account</h1>
-            <p className="text-gray-500 font-medium tracking-tight mt-1">Register your agency to get started</p>
+            <p className="text-gray-500 font-medium tracking-tight mt-1">Register as an agent to get started</p>
           </div>
         </div>
 
@@ -108,7 +107,7 @@ export default function SignupScreen() {
             <div className="relative">
               <Mail className="absolute left-3 top-3 text-gray-400" size={20} />
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@agency.com"
+                placeholder="agent@agency.com"
                 className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none transition-all" />
             </div>
           </div>

@@ -32,11 +32,8 @@ export default function PendingDepositsScreen() {
 
     const fetchPendingDeposits = async () => {
       try {
-        const agencyId = await getUserAgencyId();
-        if (!agencyId) {
-          setLoading(false);
-          return;
-        }
+        // FIX: Provide a default 'UNASSIGNED' if no agencyId is returned
+        const agencyId = await getUserAgencyId() || 'UNASSIGNED';
 
         // Query only pending deposits for this specific agency
         const qDeposits = query(

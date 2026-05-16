@@ -5,7 +5,8 @@
 
 import { BrowserRouter, Routes, Route, Navigate, Outlet, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { auth, User, getIdTokenResult, db, doc, getDoc } from './lib/firebase';
+// FIX: Imported onSnapshot, removed getIdTokenResult and getDoc
+import { auth, User, db, doc, onSnapshot } from './lib/firebase';
 
 import SplashScreen from './screens/SplashScreen';
 import LoginScreen from './screens/LoginScreen';
@@ -22,7 +23,6 @@ import NotificationsScreen from './screens/NotificationsScreen';
 import CheckoutScreen from './screens/CheckoutScreen';
 import Layout from './components/Layout';
 
-// NEW IMPORTS
 import AgentManagementScreen from './screens/Admin/AgentManagementScreen';
 import SubmitDepositScreen from './screens/SubmitDepositScreen';
 import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
@@ -30,22 +30,17 @@ import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
 import DepositHistoryScreen from './screens/DepositHistoryScreen';
 import { Shield, Users, LogOut, Wallet } from 'lucide-react';
 
-// Basic Admin Layout implementation for Manager navigation
 const AdminLayout = () => (
   <div className="min-h-screen bg-gray-50 flex">
-    {/* Admin Sidebar */}
     <aside className="w-64 bg-slate-900 text-white hidden md:flex flex-col">
       <div className="p-6 border-b border-slate-800">
         <h2 className="text-xl font-bold flex items-center gap-2"><Shield size={20} className="text-blue-400" /> Manager Portal</h2>
       </div>
       <nav className="flex-1 p-4 space-y-2">
         <Link to="/admin/dashboard" className="block px-4 py-2 rounded hover:bg-slate-800 transition">Dashboard</Link>
-        
-        {/* Link to Pending Deposits */}
         <Link to="/admin/deposits" className="flex items-center justify-between px-4 py-2 rounded hover:bg-slate-800 transition group">
           <span className="flex items-center gap-2"><Wallet size={18} className="text-emerald-400" /> Deposits</span>
         </Link>
-        
         <Link to="/admin/agents" className="flex items-center gap-2 px-4 py-2 rounded hover:bg-slate-800 transition"><Users size={18} className="text-blue-400" /> Manage Agents</Link>
       </nav>
       <div className="p-4 border-t border-slate-800">
@@ -54,7 +49,6 @@ const AdminLayout = () => (
         </button>
       </div>
     </aside>
-    {/* Main Content */}
     <main className="flex-1 overflow-auto">
       <Outlet />
     </main>
@@ -70,47 +64,57 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (u) => {
+    let unsubscribeDoc: (() => void) | undefined;
+
+    const unsubAuth = auth.onAuthStateChanged((u) => {
       if (u) {
-        try {
-          // FIX 1: Force refresh the token to instantly apply role changes during development
-          await u.getIdToken(true); 
-          
-          const tokenResult = await getIdTokenResult(u);
-          let role = tokenResult.claims.role as 'agency_manager' | 'agent' | undefined;
-
-          // FIX 2: Even if token says 'agent', double check Firestore just in case the backend sync is lagging
-          if (!role || role !== 'agency_manager') {
-            const userDoc = await getDoc(doc(db, 'users', u.uid));
-            if (userDoc.exists() && userDoc.data().role === 'agency_manager') {
-              role = 'agency_manager';
+        setUser(u);
+        
+        // FIX: Use a real-time listener on the user doc. 
+        // If you change the role in Firestore, the app updates instantly.
+        unsubscribeDoc = onSnapshot(
+          doc(db, 'users', u.uid), 
+          (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              // Check for both just in case it was typed as 'admin' in the database
+              if (data.role === 'agency_manager' || data.role === 'admin') {
+                setUserRole('agency_manager');
+              } else {
+                setUserRole('agent');
+              }
+            } else {
+              // Doc hasn't been created by LoginScreen yet, assume agent for now
+              setUserRole('agent');
             }
+            setLoading(false);
+          },
+          (error) => {
+            console.error("Error listening to user role:", error);
+            setUserRole('agent');
+            setLoading(false);
           }
-
-          setUserRole(role || 'agent'); 
-          setUser(u);
-        } catch (error) {
-          console.error("Error fetching user role:", error);
-          setUserRole('agent');
-          setUser(u);
-        }
+        );
       } else {
         setUser(null);
         setUserRole(null);
+        setLoading(false);
+        if (unsubscribeDoc) unsubscribeDoc();
       }
-      setLoading(false);
     });
     
     const timer = setTimeout(() => setShowSplash(false), 2500);
     
     return () => {
-      unsub();
+      unsubAuth();
+      if (unsubscribeDoc) unsubscribeDoc();
       clearTimeout(timer);
     };
   }, []);
 
   if (showSplash) return <SplashScreen />;
-  if (loading) return null;
+  // Don't render routes until we know the role
+  if (loading) return null; 
 
   const getInitialRoute = () => {
     return userRole === 'agency_manager' ? '/admin/dashboard' : '/dashboard';
@@ -123,9 +127,7 @@ export default function App() {
         <Route path="/signup" element={!user ? <SignupScreen /> : <Navigate to={getInitialRoute()} />} />
         <Route path="/" element={user ? <Navigate to={getInitialRoute()} /> : <Navigate to="/login" />} />
 
-        {/* ========================================== */}
-        {/* MANAGER ROUTES (AdminLayout)               */}
-        {/* ========================================== */}
+        {/* MANAGER ROUTES */}
         {userRole === 'agency_manager' && (
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" />} />
@@ -137,9 +139,7 @@ export default function App() {
           </Route>
         )}
 
-        {/* ========================================== */}
-        {/* AGENT ROUTES (Standard Layout)             */}
-        {/* ========================================== */}
+        {/* AGENT ROUTES */}
         {userRole === 'agent' && (
           <Route path="/" element={<Layout />}> 
             <Route index element={<Navigate to="dashboard" />} />
@@ -159,7 +159,6 @@ export default function App() {
           </Route>
         )}
 
-        {/* Catch-All / Security Fallback */}
         <Route path="*" element={<Navigate to={user ? getInitialRoute() : "/login"} />} />
       </Routes>
     </BrowserRouter>
