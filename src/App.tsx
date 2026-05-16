@@ -24,7 +24,11 @@ import Layout from './components/Layout';
 
 // NEW IMPORTS
 import AgentManagementScreen from './screens/Admin/AgentManagementScreen';
-import { Shield, Users, LogOut } from 'lucide-react';
+import SubmitDepositScreen from './screens/SubmitDepositScreen';
+import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
+import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
+import DepositHistoryScreen from './screens/DepositHistoryScreen';
+import { Shield, Users, LogOut, Wallet } from 'lucide-react';
 
 // Basic Admin Layout implementation for Manager navigation
 const AdminLayout = () => (
@@ -36,7 +40,13 @@ const AdminLayout = () => (
       </div>
       <nav className="flex-1 p-4 space-y-2">
         <Link to="/admin/dashboard" className="block px-4 py-2 rounded hover:bg-slate-800 transition">Dashboard</Link>
-        <Link to="/admin/agents" className="flex items-center gap-2 px-4 py-2 rounded hover:bg-slate-800 transition"><Users size={18} /> Manage Agents</Link>
+        
+        {/* Link to Pending Deposits */}
+        <Link to="/admin/deposits" className="flex items-center justify-between px-4 py-2 rounded hover:bg-slate-800 transition group">
+          <span className="flex items-center gap-2"><Wallet size={18} className="text-emerald-400" /> Deposits</span>
+        </Link>
+        
+        <Link to="/admin/agents" className="flex items-center gap-2 px-4 py-2 rounded hover:bg-slate-800 transition"><Users size={18} className="text-blue-400" /> Manage Agents</Link>
       </nav>
       <div className="p-4 border-t border-slate-800">
         <button onClick={() => auth.signOut()} className="flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 w-full">
@@ -55,7 +65,7 @@ const AdminDashboardScreen = () => <div className="p-8 font-bold text-2xl text-g
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<'manager' | 'agent' | null>(null);
+  const [userRole, setUserRole] = useState<'agency_manager' | 'agent' | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
 
@@ -63,13 +73,17 @@ export default function App() {
     const unsub = auth.onAuthStateChanged(async (u) => {
       if (u) {
         try {
+          // FIX 1: Force refresh the token to instantly apply role changes during development
+          await u.getIdToken(true); 
+          
           const tokenResult = await getIdTokenResult(u);
-          let role = tokenResult.claims.role as 'manager' | 'agent' | undefined;
+          let role = tokenResult.claims.role as 'agency_manager' | 'agent' | undefined;
 
-          if (!role) {
+          // FIX 2: Even if token says 'agent', double check Firestore just in case the backend sync is lagging
+          if (!role || role !== 'agency_manager') {
             const userDoc = await getDoc(doc(db, 'users', u.uid));
-            if (userDoc.exists()) {
-              role = userDoc.data().role;
+            if (userDoc.exists() && userDoc.data().role === 'agency_manager') {
+              role = 'agency_manager';
             }
           }
 
@@ -99,7 +113,7 @@ export default function App() {
   if (loading) return null;
 
   const getInitialRoute = () => {
-    return userRole === 'manager' ? '/admin/dashboard' : '/dashboard';
+    return userRole === 'agency_manager' ? '/admin/dashboard' : '/dashboard';
   };
 
   return (
@@ -112,12 +126,13 @@ export default function App() {
         {/* ========================================== */}
         {/* MANAGER ROUTES (AdminLayout)               */}
         {/* ========================================== */}
-        {userRole === 'manager' && (
+        {userRole === 'agency_manager' && (
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" />} />
             <Route path="dashboard" element={<AdminDashboardScreen />} />
-            {/* NEW: Agent Management Route added here */}
             <Route path="agents" element={<AgentManagementScreen />} />
+            <Route path="agents/:id" element={<AgentDetailScreen />} />
+            <Route path="deposits" element={<PendingDepositsScreen />} />
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Route>
         )}
@@ -138,6 +153,8 @@ export default function App() {
             <Route path="followups" element={<FollowUpScreen />} />
             <Route path="notifications" element={<NotificationsScreen />} />
             <Route path="checkout" element={<CheckoutScreen />} />
+            <Route path="submit-deposit" element={<SubmitDepositScreen />} />
+            <Route path="deposit-history" element={<DepositHistoryScreen />} />
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Route>
         )}

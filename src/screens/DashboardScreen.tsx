@@ -11,7 +11,8 @@ import {
   ChevronRight,
   IndianRupee,
   Bell,
-  Activity
+  Activity,
+  Wallet
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { auth, db, collection, query, where, onSnapshot } from '../lib/firebase';
@@ -44,6 +45,7 @@ export default function DashboardScreen() {
   const [allCustomers, setAllCustomers] = useState<any[]>([]);
   const [allTasks, setAllTasks] = useState<any[]>([]);
   const [allInteractions, setAllInteractions] = useState<any[]>([]); 
+  const [allCashDeposits, setAllCashDeposits] = useState<any[]>([]); // NEW: State for Cash Deposits
   const [dateFilter, setDateFilter] = useState('today');
 
   const { isExpired } = useTrialStatus();
@@ -53,7 +55,6 @@ export default function DashboardScreen() {
     if (!auth.currentUser) return;
     const agentId = auth.currentUser.uid;
 
-    // FIX: Reverted to querying strictly by assignedAgentId so legacy data loads safely
     const qCustomers = query(
       collection(db, 'customers'), 
       where('assignedAgentId', '==', agentId)
@@ -85,10 +86,22 @@ export default function DashboardScreen() {
       console.error("Failed to fetch interactions:", error);
     });
 
+    // NEW: Fetch Cash Deposits for this agent
+    const qDeposits = query(
+      collection(db, 'cashDeposits'),
+      where('agentId', '==', agentId)
+    );
+    const unsubDeposits = onSnapshot(qDeposits, (snap) => {
+      setAllCashDeposits(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => {
+      console.error("Failed to fetch cash deposits:", error);
+    });
+
     return () => {
       unsubCustomers();
       unsubFollowups();
       unsubInteractions();
+      unsubDeposits(); // NEW: Cleanup listener
     };
   }, []);
 
@@ -111,7 +124,12 @@ export default function DashboardScreen() {
       missedFollowups: 0,
       overdue0to7: 0,
       overdue8to30: 0,
-      overdue30plus: 0
+      overdue30plus: 0,
+      // NEW: Cash in Hand metrics
+      cashToday: 0,
+      pendingHandover: 0,
+      approvedHandover: 0,
+      netCash: 0
     };
 
     allCustomers.forEach(doc => {
@@ -131,6 +149,7 @@ export default function DashboardScreen() {
       }
     });
 
+    // Calculate generic timeline stats
     if (dateFilter === 'all') {
       allCustomers.forEach(doc => {
         const received = Number(doc.totalReceivedAmount !== undefined ? doc.totalReceivedAmount : (doc.receivedAmount || 0));
@@ -141,13 +160,29 @@ export default function DashboardScreen() {
       allInteractions.forEach(interaction => {
         if (isDateInFilter(interaction.timestamp, dateFilter)) {
           result.visitsInPeriod += 1;
-          
           if (interaction.type === 'payment' && interaction.amount) {
             result.collectedInPeriod += Number(interaction.amount);
           }
         }
       });
     }
+
+    // NEW: Calculate STRICTLY "Today's" Cash in Hand logic
+    allInteractions.forEach(interaction => {
+      if (interaction.type === 'payment' && isDateInFilter(interaction.timestamp, 'today')) {
+        result.cashToday += Number(interaction.amount || 0);
+      }
+    });
+
+    allCashDeposits.forEach(dep => {
+      if (isDateInFilter(dep.createdAt, 'today')) {
+        if (dep.status === 'pending') result.pendingHandover += Number(dep.amount || 0);
+        if (dep.status === 'approved') result.approvedHandover += Number(dep.amount || 0);
+      }
+    });
+
+    // Net Cash in pocket right now = What was collected today - (what is pending handover + what manager already approved)
+    result.netCash = Math.max(0, result.cashToday - (result.pendingHandover + result.approvedHandover));
 
     const todayStr = new Date().toISOString().split('T')[0];
     allTasks.forEach(f => {
@@ -161,7 +196,7 @@ export default function DashboardScreen() {
     });
 
     return result;
-  }, [allCustomers, allTasks, allInteractions, dateFilter]);
+  }, [allCustomers, allTasks, allInteractions, allCashDeposits, dateFilter]);
 
   const recentCustomers = allCustomers.filter(d => d.status !== 'Full Payment').slice(0, 3);
 
@@ -188,6 +223,52 @@ export default function DashboardScreen() {
           <Bell size={24} />
           <span className="absolute top-3 right-3 w-3 h-3 bg-red-500 border-2 border-white rounded-full" />
         </Link>
+      </div>
+
+      {/* NEW: Agent Cash-in-Hand Card (Prominent Top Section) */}
+      <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden mt-2">
+        <div className="absolute -right-10 -top-10 text-slate-800 opacity-20 pointer-events-none">
+          <Wallet size={150} />
+        </div>
+        
+        <div className="relative z-10 flex justify-between items-start">
+          <div>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5">
+              <Wallet size={12} /> Net Cash in Pocket
+            </p>
+            <h2 className="text-4xl font-black text-emerald-400 mt-1">{formatCurrency(stats.netCash)}</h2>
+          </div>
+          
+          <Link 
+            to="/submit-deposit" 
+            className="bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-2 rounded-xl flex items-center space-x-2 transition-colors shadow-lg shadow-emerald-500/20 active:scale-95"
+          >
+            <span className="text-xs font-bold tracking-wide">Deposit</span>
+            <ChevronRight size={14} />
+          </Link>
+        </div>
+        
+        <div className="relative z-10 grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-white/10">
+          <div>
+            <p className="text-slate-500 text-[9px] font-bold uppercase tracking-widest">Total Collected</p>
+            <p className="font-bold text-sm text-white mt-0.5">{formatCurrency(stats.cashToday)}</p>
+          </div>
+          <div>
+            <p className="text-slate-500 text-[9px] font-bold uppercase tracking-widest">Pending</p>
+            <p className="font-bold text-sm text-orange-400 mt-0.5">{formatCurrency(stats.pendingHandover)}</p>
+          </div>
+          <div>
+            <p className="text-slate-500 text-[9px] font-bold uppercase tracking-widest">Handed Over</p>
+            <p className="font-bold text-sm text-blue-400 mt-0.5">{formatCurrency(stats.approvedHandover)}</p>
+          </div>
+        </div>
+
+        {/* NEW: Link to Deposit History */}
+        <div className="relative z-10 mt-4 pt-3 border-t border-white/5 flex justify-center">
+          <Link to="/deposit-history" className="text-[10px] text-slate-400 hover:text-white font-bold uppercase tracking-widest flex items-center gap-1 transition-colors">
+            View Handover History <ChevronRight size={12} />
+          </Link>
+        </div>
       </div>
 
       {/* Date Filter Selection */}

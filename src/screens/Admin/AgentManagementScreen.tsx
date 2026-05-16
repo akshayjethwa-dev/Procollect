@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db, auth } from '../../lib/firebase';
-import { UserPlus, Key, Shield, Copy, CheckCircle2 } from 'lucide-react';
+import { UserPlus, Key, Shield, Copy, CheckCircle2, Wallet } from 'lucide-react';
+import { Link } from 'react-router-dom'; // <-- NEW IMPORT
 
 export default function AgentManagementScreen() {
   const [agents, setAgents] = useState<any[]>([]);
@@ -106,13 +107,26 @@ export default function AgentManagementScreen() {
             <tbody className="divide-y divide-gray-100 text-sm">
               {agents.map((agent) => (
                 <tr key={agent.id} className="hover:bg-gray-50/50">
-                  <td className="p-4 font-medium text-gray-800">{agent.name}</td>
+                  <td className="p-4 font-medium text-gray-800">
+                    {/* NEW: Agent name is now a clickable link to their ledger */}
+                    <Link to={`/admin/agents/${agent.id}`} className="hover:text-blue-600 transition-colors">
+                      {agent.name}
+                    </Link>
+                  </td>
                   <td className="p-4 text-blue-600">{agent.email}</td>
                   <td className="p-4 text-gray-600">{agent.phone}</td>
-                  <td className="p-4">
+                  <td className="p-4 flex items-center gap-4">
+                    {/* NEW: View Ledger Button */}
+                    <Link 
+                      to={`/admin/agents/${agent.id}`}
+                      className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 transition-colors"
+                    >
+                      <Wallet size={16} /> View Ledger
+                    </Link>
+
                     <button 
                       onClick={() => setResetModalId(agent.id)}
-                      className="text-gray-500 hover:text-blue-600 flex items-center gap-1"
+                      className="text-gray-500 hover:text-blue-600 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
                     >
                       <Key size={16} /> Reset Password
                     </button>

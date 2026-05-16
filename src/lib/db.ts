@@ -91,6 +91,21 @@ export interface UserProfile {
   role?: 'admin' | 'agent'; // Useful for future role-based checks
 }
 
+// NEW: Cash Deposit Interface
+export interface CashDeposit {
+  id: string;
+  agentId: string;
+  agentName: string; // Stored to avoid extra reads
+  agencyId: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  notes: string;
+  rejectionReason?: string;
+  createdAt: string;
+  processedAt?: string;
+  processedBy?: string; // Manager ID who approved/rejected
+}
+
 export class ProCollectDatabase extends Dexie {
   customers!: Table<Customer>;
   loans!: Table<Loan>; 
@@ -98,17 +113,19 @@ export class ProCollectDatabase extends Dexie {
   followups!: Table<FollowUp>;
   notifications!: Table<Notification>;
   users!: Table<UserProfile>;
+  cashDeposits!: Table<CashDeposit>; // <-- NEW table registered
 
   constructor() {
     super('ProCollectDB');
-    // Bumped version to 3 and added agencyId to indices for fast querying
-    this.version(3).stores({
+    // Bumped version to 4 for cashDeposits and added index for fast querying
+    this.version(4).stores({
       customers: 'id, agencyId, assignedAgentId, status, mobile',
       loans: 'id, agencyId, customerId, loanId, assignedAgentId',
       visits: 'id, agencyId, customerId, agentId, date',
       followups: 'id, agencyId, customerId, agentId, scheduledAt, status',
       notifications: 'id, agencyId, agentId, sentAt, read',
-      users: 'uid, agencyId, email'
+      users: 'uid, agencyId, email',
+      cashDeposits: 'id, agencyId, agentId, status, createdAt' // <-- NEW indices
     });
   }
 }

@@ -171,7 +171,7 @@ export const syncUserRoleToCustomClaims = onDocumentWritten("users/{userId}", as
 
 
 // ==========================================
-// NEW: AGENT MANAGEMENT FUNCTIONS
+// AGENT MANAGEMENT FUNCTIONS
 // ==========================================
 
 export const createAgentAccount = onCall(async (request) => {
@@ -180,10 +180,10 @@ export const createAgentAccount = onCall(async (request) => {
     throw new HttpsError('unauthenticated', 'You must be logged in to provision an agent.');
   }
 
-  // 2. Verify caller has Manager permissions
+  // 2. Verify caller has Manager permissions (UPDATED to 'agency_manager')
   const callerId = request.auth.uid;
   const callerRecord = await admin.auth().getUser(callerId);
-  if (callerRecord.customClaims?.role !== 'manager') {
+  if (callerRecord.customClaims?.role !== 'agency_manager') {
     throw new HttpsError('permission-denied', 'Only managers can provision new agents.');
   }
 
@@ -242,8 +242,9 @@ export const resetAgentPassword = onCall(async (request) => {
     throw new HttpsError('unauthenticated', 'Not logged in');
   }
 
+  // UPDATED to 'agency_manager'
   const callerRecord = await admin.auth().getUser(request.auth.uid);
-  if (callerRecord.customClaims?.role !== 'manager') {
+  if (callerRecord.customClaims?.role !== 'agency_manager') {
     throw new HttpsError('permission-denied', 'Only managers can reset passwords.');
   }
   
@@ -266,5 +267,39 @@ export const resetAgentPassword = onCall(async (request) => {
   } catch (error: any) {
     console.error("Error resetting password:", error);
     throw new HttpsError('internal', 'Failed to reset password');
+  }
+});
+
+// ==========================================
+// NEW: PROMOTE USER TO MANAGER
+// ==========================================
+export const promoteToManager = onCall(async (request) => {
+  // OPTIONAL: You can add an admin check here later if you build a super-admin portal
+  
+  const targetUid = request.data.targetUid;
+  const agencyId = request.data.agencyId;
+
+  if (!targetUid || !agencyId) {
+    throw new HttpsError('invalid-argument', 'Missing targetUid or agencyId.');
+  }
+
+  try {
+    // 1. Set the Custom Claims
+    await admin.auth().setCustomUserClaims(targetUid, {
+      role: 'agency_manager',
+      agencyId: agencyId
+    });
+
+    // 2. Update the Firestore Document
+    await admin.firestore().collection('users').doc(targetUid).set({
+      role: 'agency_manager',
+      agencyId: agencyId,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    return { success: true, message: `User ${targetUid} promoted to Manager of ${agencyId}.` };
+  } catch (error: any) {
+    console.error("Error promoting manager:", error);
+    throw new HttpsError('internal', 'Failed to promote user.');
   }
 });

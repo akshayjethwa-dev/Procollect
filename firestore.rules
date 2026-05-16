@@ -9,15 +9,15 @@ service cloud.firestore {
 
     function isSubscribed() {
       // PRODUCTION MODE: Replace with token check when ready
-      return true; 
+      return true;
       // return request.auth.token.isSubscribed == true;
     }
 
     // Core Multi-Tenancy validation function
     function isSameAgency(documentAgencyId) {
       // Allow if the document is unassigned, OR if the user token matches the document
-      return documentAgencyId == 'UNASSIGNED' || 
-             (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
+      return documentAgencyId == 'UNASSIGNED' ||
+        (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
     }
 
     // Rules for User Profiles
@@ -29,16 +29,13 @@ service cloud.firestore {
     match /customers/{customerId} {
       // Agent can read if they own the record directly OR if they share the same agency
       allow read: if isAuthenticated() && (resource.data.assignedAgentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      
       allow create: if isAuthenticated() 
                     && (request.resource.data.assignedAgentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')))
                     && isSubscribed();
-                    
       allow update: if isAuthenticated() 
                     && (resource.data.assignedAgentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')))
                     && (request.resource.data.assignedAgentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')))
                     && isSubscribed();
-                    
       allow delete: if false; 
     }
 
@@ -76,6 +73,22 @@ service cloud.firestore {
       allow create, update, delete: if isAuthenticated() 
                                     && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) 
                                     && isSubscribed();
+    }
+
+    // NEW: Rules for Cash Deposits
+    match /cashDeposits/{depositId} {
+      // Agents can create requests for themselves
+      allow create: if isAuthenticated() 
+                    && request.resource.data.agentId == request.auth.uid;
+      
+      // Agents can read their own; Managers can read everything in their agency
+      allow read: if isAuthenticated() 
+                  && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
+      
+      // Only Managers can update (Approve/Reject) within their own agency
+      allow update: if isAuthenticated() 
+                    && request.auth.token.role == 'agency_manager' 
+                    && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
     }
 
     // Default deny for all other collections
