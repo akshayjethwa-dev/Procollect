@@ -196,8 +196,11 @@ export const createAgentAccount = onCall(async (request) => {
   const generatedId = `AGT-${Math.floor(10000 + Math.random() * 90000)}`;
   const loginEmail = `${generatedId.toLowerCase()}@procollect.local`; 
   
-  // Fallback to manager's UID if agencyId isn't explicitly set yet
-  const managerAgencyId = callerRecord.customClaims?.agencyId || callerId; 
+  // THE FIX: Protect against cached 'UNASSIGNED' claims bleeding through to new agents
+  let managerAgencyId = callerRecord.customClaims?.agencyId;
+  if (!managerAgencyId || managerAgencyId === 'UNASSIGNED') {
+    managerAgencyId = callerId;
+  }
 
   try {
     // 4. Create Auth User
@@ -256,7 +259,12 @@ export const resetAgentPassword = onCall(async (request) => {
   try {
     // Security check: Ensure agent belongs to this manager's agency
     const agentRecord = await admin.auth().getUser(uid);
-    const managerAgencyId = callerRecord.customClaims?.agencyId || request.auth.uid;
+    
+    // THE FIX: Also apply the safeguard here so managers can securely manage their agents
+    let managerAgencyId = callerRecord.customClaims?.agencyId;
+    if (!managerAgencyId || managerAgencyId === 'UNASSIGNED') {
+      managerAgencyId = request.auth.uid;
+    }
     
     if (agentRecord.customClaims?.agencyId !== managerAgencyId) {
       throw new HttpsError('permission-denied', 'Cannot modify an agent outside your agency.');

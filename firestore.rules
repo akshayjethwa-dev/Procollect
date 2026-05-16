@@ -15,9 +15,10 @@ service cloud.firestore {
 
     // Core Multi-Tenancy validation function
     function isSameAgency(documentAgencyId) {
-      // Allow if the document is unassigned, OR if the user token matches the document
+      // FIX 1: Allow if the document belongs to the user's own UID (manager acting as independent agency)
       return documentAgencyId == 'UNASSIGNED' ||
-        (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
+             documentAgencyId == request.auth.uid ||
+             (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
     }
 
     // =========================================================
@@ -29,7 +30,9 @@ service cloud.firestore {
         request.auth.uid == userId || 
         // OR an Admin/Manager can read profiles within their SAME agency
         (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'admin'] &&
+          // FIX 2: Check both the token AND fallback to the database in case the token is stale
+          (request.auth.token.role in ['agency_manager', 'admin'] || 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'admin']) &&
           isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
         )
       );
@@ -89,7 +92,8 @@ service cloud.firestore {
     match /cashDeposits/{depositId} {
       allow create: if isAuthenticated() && request.resource.data.agentId == request.auth.uid;
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      allow update: if isAuthenticated() && request.auth.token.role == 'agency_manager' && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+      // FIX 3: Ensure update rules also handle stale auth tokens
+      allow update: if isAuthenticated() && (request.auth.token.role == 'agency_manager' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'agency_manager') && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
     }
 
     // Default deny for all other collections

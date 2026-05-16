@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { auth, db, collection, query, where, onSnapshot, doc, updateDoc } from '../../lib/firebase';
+import { auth, db, collection, query, where, onSnapshot, doc, updateDoc, getDocs } from '../../lib/firebase';
 import { getUserAgencyId } from '../../lib/firebase';
 import { formatCurrency } from '../../lib/utils';
 import { Clock, Wallet, User, FileText, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
@@ -28,45 +28,63 @@ export default function PendingDepositsScreen() {
   const [rejectionReason, setRejectionReason] = useState('');
 
   useEffect(() => {
-    let unsubscribe: () => void;
+    let unsubscribeDeposits: (() => void) | undefined;
 
-    const fetchPendingDeposits = async () => {
-      try {
-        // FIX: Provide a default 'UNASSIGNED' if no agencyId is returned
-        const agencyId = await getUserAgencyId() || 'UNASSIGNED';
+    // FIX 1: Wrap in auth listener to prevent loading defaults when Auth is still pending
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        setLoading(true);
+        try {
+          // Provide a secure default instead of 'UNASSIGNED'
+          const agencyId = await getUserAgencyId() || user.uid;
 
-        // Query only pending deposits for this specific agency
-        const qDeposits = query(
-          collection(db, 'cashDeposits'),
-          where('agencyId', '==', agencyId),
-          where('status', '==', 'pending')
-        );
+          // FIX 2: Double security lock. Fetch ONLY your valid agents first.
+          const agentsQuery = query(
+            collection(db, 'users'),
+            where('role', '==', 'agent'),
+            where('agencyId', '==', agencyId)
+          );
+          const agentsSnap = await getDocs(agentsQuery);
+          const validAgentIds = new Set(agentsSnap.docs.map(doc => doc.id));
 
-        unsubscribe = onSnapshot(qDeposits, (snapshot) => {
-          const data: DepositRequest[] = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as DepositRequest[];
+          // Query only pending deposits for this specific agency
+          const qDeposits = query(
+            collection(db, 'cashDeposits'),
+            where('agencyId', '==', agencyId),
+            where('status', '==', 'pending')
+          );
 
-          // Sort client-side: Oldest first (managers usually process oldest requests first)
-          data.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-          
-          setDeposits(data);
+          unsubscribeDeposits = onSnapshot(qDeposits, (snapshot) => {
+            let data = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            })) as DepositRequest[];
+
+            // FIX 3: Filter client-side to absolutely guarantee you only see deposits from your verified agents
+            data = data.filter(dep => validAgentIds.has(dep.agentId));
+
+            // Sort client-side: Oldest first (managers usually process oldest requests first)
+            data.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            
+            setDeposits(data);
+            setLoading(false);
+          }, (error) => {
+            handleFirestoreError(error, OperationType.LIST, 'cashDeposits_pending');
+            setLoading(false);
+          });
+        } catch (error) {
+          console.error("Error setting up deposits listener:", error);
           setLoading(false);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, 'cashDeposits_pending');
-          setLoading(false);
-        });
-      } catch (error) {
-        console.error("Error setting up deposits listener:", error);
+        }
+      } else {
+        setDeposits([]);
         setLoading(false);
       }
-    };
-
-    fetchPendingDeposits();
+    });
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      unsubscribeAuth();
+      if (unsubscribeDeposits) unsubscribeDeposits();
     };
   }, []);
 
@@ -80,7 +98,6 @@ export default function PendingDepositsScreen() {
         processedAt: new Date().toISOString(),
         processedBy: auth.currentUser.uid
       });
-      // Document will automatically disappear from the list due to the onSnapshot query
     } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `cashDeposits/${depositId}`);
       alert("Failed to approve the deposit. Please try again.");
@@ -98,7 +115,7 @@ export default function PendingDepositsScreen() {
     if (!auth.currentUser || !selectedDepositId || !rejectionReason.trim()) return;
     
     setProcessingId(selectedDepositId);
-    setRejectModalOpen(false); // Close modal immediately to show loading state on the list
+    setRejectModalOpen(false);
 
     try {
       await updateDoc(doc(db, 'cashDeposits', selectedDepositId), {

@@ -1,7 +1,6 @@
 // src/lib/firebase.ts
 /// <reference types="vite/client" />
 
-// FIX 1: Added getApps and getApp to check for existing initialization
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -13,7 +12,7 @@ import {
   getIdTokenResult
 } from 'firebase/auth';
 import { 
-  getFirestore, // FIX 2: Added getFirestore 
+  getFirestore, 
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
@@ -57,12 +56,9 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-// FIX 3: HMR Safe App Initialization
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// FIX 4: HMR Safe Firestore Initialization
-// If it's the first load, initialize with offline cache. If HMR reloads, just get the existing instance.
 export const db = !getApps().length 
   ? initializeFirestore(app, {
       localCache: persistentLocalCache({
@@ -77,25 +73,28 @@ export const functions = getFunctions(app);
 // Helper to get the user's agency ID from Custom Claims or Firestore fallback
 export const getUserAgencyId = async (): Promise<string> => {
   const user = auth.currentUser;
-  if (!user) return 'UNASSIGNED';
+  // Fallback if not logged in
+  if (!user) return ''; 
   
   try {
-    // 1. Check custom claims first
+    // 1. Check custom claims first (ignore if it's 'UNASSIGNED')
     const tokenResult = await getIdTokenResult(user);
-    if (tokenResult.claims && tokenResult.claims.agencyId) {
+    if (tokenResult.claims && tokenResult.claims.agencyId && tokenResult.claims.agencyId !== 'UNASSIGNED') {
       return tokenResult.claims.agencyId as string;
     }
 
-    // 2. Fallback to Firestore (helpful for dev or before claims sync)
+    // 2. Fallback to Firestore (ignore if it's 'UNASSIGNED')
     const userDoc = await getDoc(doc(db, 'users', user.uid));
-    if (userDoc.exists() && userDoc.data().agencyId) {
+    if (userDoc.exists() && userDoc.data().agencyId && userDoc.data().agencyId !== 'UNASSIGNED') {
       return userDoc.data().agencyId;
     }
   } catch (error) {
-    console.warn("Could not fetch agency ID, defaulting to UNASSIGNED", error);
+    console.warn("Could not fetch agency ID, defaulting to User ID", error);
   }
 
-  return 'UNASSIGNED';
+  // 3. THE FIX: Default to the user's OWN UID. 
+  // This matches the backend where an independent manager IS the agency.
+  return user.uid;
 };
 
 export const checkSubscriptionStatus = async (): Promise<boolean> => {

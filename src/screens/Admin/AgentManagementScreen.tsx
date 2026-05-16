@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-// FIX 1: Imported getUserAgencyId
 import { db, auth, getUserAgencyId } from '../../lib/firebase';
 import { UserPlus, Key, Shield, Copy, CheckCircle2, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -25,14 +24,14 @@ export default function AgentManagementScreen() {
 
   const functions = getFunctions(auth.app);
 
-  const fetchAgents = async () => {
+  const fetchAgents = async (user: any) => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      // FIX 2: Get the current manager's agency ID
-      const agencyId = await getUserAgencyId() || 'UNASSIGNED';
+      // FIX: Use user.uid as a robust fallback instead of 'UNASSIGNED'
+      const agencyId = await getUserAgencyId() || user.uid;
 
-      // FIX 3: Filter the query to only show agents with matching agencyId
+      // Filter the query to only show agents with matching agencyId
       const q = query(
         collection(db, 'users'), 
         where('role', '==', 'agent'),
@@ -44,7 +43,6 @@ export default function AgentManagementScreen() {
       setAgents(agentsList);
     } catch (error: any) {
       console.error("Error fetching agents", error);
-      // Catch missing index errors explicitly
       if (error.message.includes('index')) {
         setErrorMsg('Firestore indexing required. Check your browser console for the link to build the index.');
       } else {
@@ -55,15 +53,27 @@ export default function AgentManagementScreen() {
   };
 
   useEffect(() => {
-    fetchAgents();
+    // FIX: Wait for Firebase Auth state to be ready to avoid 'UNASSIGNED' bugs
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (user) {
+        fetchAgents(user);
+      } else {
+        setAgents([]);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribeAuth();
   }, []);
 
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!auth.currentUser) return alert("You must be logged in.");
+    
     setIsSubmitting(true);
     try {
-      // FIX 4: Send the current manager's agencyId to the cloud function
-      const agencyId = await getUserAgencyId() || 'UNASSIGNED';
+      // FIX: Use current user ID as fallback instead of 'UNASSIGNED'
+      const agencyId = await getUserAgencyId() || auth.currentUser.uid;
       const createAgentFn = httpsCallable(functions, 'createAgentAccount');
       const result = await createAgentFn({ name, phone, password, agencyId });
       
@@ -72,7 +82,7 @@ export default function AgentManagementScreen() {
       
       // Reset form
       setName(''); setPhone(''); setPassword('');
-      fetchAgents(); // refresh list
+      fetchAgents(auth.currentUser); // refresh list
     } catch (error: any) {
       alert("Error: " + error.message);
     }
