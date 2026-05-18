@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { auth, db, collection, query, where, onSnapshot, doc, updateDoc, getDocs } from '../../lib/firebase';
 import { getUserAgencyId } from '../../lib/firebase';
 import { formatCurrency } from '../../lib/utils';
-import { Clock, Wallet, User, FileText, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { Clock, Wallet, User, FileText, CheckCircle2, XCircle, AlertCircle, ArrowLeft } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
+import { Link } from 'react-router-dom';
 
 interface DepositRequest {
   id: string;
@@ -19,10 +20,8 @@ export default function PendingDepositsScreen() {
   const [deposits, setDeposits] = useState<DepositRequest[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Action states
   const [processingId, setProcessingId] = useState<string | null>(null);
   
-  // Modal states for Rejection
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [selectedDepositId, setSelectedDepositId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -30,15 +29,12 @@ export default function PendingDepositsScreen() {
   useEffect(() => {
     let unsubscribeDeposits: (() => void) | undefined;
 
-    // FIX 1: Wrap in auth listener to prevent loading defaults when Auth is still pending
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       if (user) {
         setLoading(true);
         try {
-          // Provide a secure default instead of 'UNASSIGNED'
           const agencyId = await getUserAgencyId() || user.uid;
 
-          // FIX 2: Double security lock. Fetch ONLY your valid agents first.
           const agentsQuery = query(
             collection(db, 'users'),
             where('role', '==', 'agent'),
@@ -47,7 +43,6 @@ export default function PendingDepositsScreen() {
           const agentsSnap = await getDocs(agentsQuery);
           const validAgentIds = new Set(agentsSnap.docs.map(doc => doc.id));
 
-          // Query only pending deposits for this specific agency
           const qDeposits = query(
             collection(db, 'cashDeposits'),
             where('agencyId', '==', agencyId),
@@ -60,10 +55,7 @@ export default function PendingDepositsScreen() {
               ...doc.data()
             })) as DepositRequest[];
 
-            // FIX 3: Filter client-side to absolutely guarantee you only see deposits from your verified agents
             data = data.filter(dep => validAgentIds.has(dep.agentId));
-
-            // Sort client-side: Oldest first (managers usually process oldest requests first)
             data.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
             
             setDeposits(data);
@@ -134,20 +126,28 @@ export default function PendingDepositsScreen() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8 relative">
+    <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-6 md:space-y-8 relative">
+      
+      {/* Mobile Back Button */}
+      <div className="md:hidden">
+        <Link to="/admin/dashboard" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-sm bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm transition-colors active:scale-95">
+          <ArrowLeft size={16} /> Dashboard
+        </Link>
+      </div>
+
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
-            <Wallet className="text-emerald-500" size={32} />
-            Pending Cash Handovers
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 flex items-center gap-3">
+            <Wallet className="text-emerald-500" size={28} />
+            Pending Handovers
           </h1>
-          <p className="text-slate-500 mt-2 font-medium">
+          <p className="text-sm md:text-base text-slate-500 mt-2 font-medium">
             Review and reconcile cash collected by your agents.
           </p>
         </div>
         
-        <div className="bg-orange-50 text-orange-600 px-4 py-2 rounded-xl flex items-center space-x-2 border border-orange-100 font-bold">
+        <div className="w-full md:w-auto bg-orange-50 text-orange-600 px-4 py-3 md:py-2 rounded-xl flex items-center justify-center space-x-2 border border-orange-100 font-bold">
           <Clock size={20} />
           <span>{deposits.length} Pending</span>
         </div>
@@ -176,11 +176,11 @@ export default function PendingDepositsScreen() {
             return (
               <div
                 key={deposit.id}
-                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 transition-all hover:shadow-md"
+                className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 transition-all hover:shadow-md"
               >
                 {/* Info Section */}
-                <div className="flex-1 space-y-3">
-                  <div className="flex items-center justify-between md:justify-start gap-4 flex-wrap">
+                <div className="flex-1 space-y-4 w-full">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="flex items-center gap-2 text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
                       <User size={16} className="text-brand-500" />
                       <span className="font-bold text-sm">{deposit.agentName}</span>
@@ -209,19 +209,19 @@ export default function PendingDepositsScreen() {
                 </div>
 
                 {/* Actions Section */}
-                <div className="w-full md:w-auto flex md:flex-col gap-3 shrink-0">
+                <div className="w-full md:w-auto flex flex-col md:flex-col gap-3 shrink-0 mt-2 md:mt-0 border-t border-slate-100 pt-4 md:border-none md:pt-0">
                   <button 
                     onClick={() => handleApprove(deposit.id)}
                     disabled={isProcessing}
-                    className="flex-1 md:flex-none bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-emerald-200 active:scale-95"
+                    className="w-full md:w-auto bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 md:py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-emerald-200 active:scale-95"
                   >
                     {isProcessing ? <Clock size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
-                    {isProcessing ? 'Saving...' : 'Approve'}
+                    {isProcessing ? 'Saving...' : 'Approve Amount'}
                   </button>
                   <button 
                     onClick={() => openRejectModal(deposit.id)}
                     disabled={isProcessing}
-                    className="flex-1 md:flex-none bg-white hover:bg-red-50 text-red-600 border border-red-200 px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                    className="w-full md:w-auto bg-white hover:bg-red-50 text-red-600 border border-red-200 px-6 py-3 md:py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                   >
                     <XCircle size={18} /> Reject
                   </button>

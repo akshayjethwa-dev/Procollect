@@ -5,7 +5,6 @@
 
 import { BrowserRouter, Routes, Route, Navigate, Outlet, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-// FIX: Imported onSnapshot, removed getIdTokenResult and getDoc
 import { auth, User, db, doc, onSnapshot } from './lib/firebase';
 
 import SplashScreen from './screens/SplashScreen';
@@ -28,141 +27,149 @@ import SubmitDepositScreen from './screens/SubmitDepositScreen';
 import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
 import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
 import DepositHistoryScreen from './screens/DepositHistoryScreen';
-import { Shield, Users, LogOut, Wallet, Menu } from 'lucide-react';
+import { Shield, Users, LogOut, Wallet, Menu, ChevronRight } from 'lucide-react';
 import { cn } from './lib/utils';
 
 const AdminLayout = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar for desktop */}
-      <aside className="w-64 bg-slate-900 text-white hidden md:flex flex-col">
-        <div className="p-6 border-b border-slate-800">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Shield size={20} className="text-blue-400" /> Manager Portal
-          </h2>
-        </div>
-        <nav className="flex-1 p-4 space-y-2">
-          <Link to="/admin/dashboard" className="block px-4 py-2 rounded hover:bg-slate-800 transition">
-            Dashboard
-          </Link>
-          <Link
-            to="/admin/deposits"
-            className="flex items-center justify-between px-4 py-2 rounded hover:bg-slate-800 transition group"
-          >
-            <span className="flex items-center gap-2">
-              <Wallet size={18} className="text-emerald-400" /> Deposits
-            </span>
-          </Link>
-          <Link
-            to="/admin/agents"
-            className="flex items-center gap-2 px-4 py-2 rounded hover:bg-slate-800 transition"
-          >
-            <Users size={18} className="text-blue-400" /> Manage Agents
-          </Link>
-        </nav>
-        <div className="p-4 border-t border-slate-800">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      
+      {/* Universal Top Header */}
+      <header className="sticky top-0 z-30 bg-slate-900 text-white flex items-center justify-between px-4 py-3 shadow-md">
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => auth.signOut()}
-            className="flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 w-full"
+            onClick={() => setIsMenuOpen(true)}
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 transition-transform"
+            aria-label="Open menu"
           >
-            <LogOut size={18} /> Logout
+            <Menu size={24} />
           </button>
-        </div>
-      </aside>
-
-      {/* Mobile header + slide-over menu */}
-      <div className="flex-1 flex flex-col md:ml-0">
-        <header className="md:hidden sticky top-0 z-30 bg-slate-900 text-white flex items-center justify-between px-4 py-3 shadow-sm">
           <div className="flex items-center gap-2">
             <Shield size={20} className="text-blue-400" />
-            <span className="font-semibold text-sm">Manager Portal</span>
-          </div>
-          <button
-            onClick={() => setIsMenuOpen((prev) => !prev)}
-            className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 transition-transform"
-            aria-label="Toggle menu"
-          >
-            <Menu size={20} />
-          </button>
-        </header>
-
-        {/* Mobile menu sheet */}
-        <div
-          className={cn(
-            'md:hidden fixed inset-0 z-20 transition-opacity',
-            isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-          )}
-        >
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setIsMenuOpen(false)}
-          />
-          <div className="absolute top-0 left-0 bottom-0 w-64 bg-slate-900 text-white shadow-xl flex flex-col">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Shield size={20} className="text-blue-400" />
-                <span className="font-semibold text-sm">Manager Menu</span>
-              </div>
-              <button
-                onClick={() => setIsMenuOpen(false)}
-                className="p-1 rounded-full hover:bg-slate-800"
-                aria-label="Close menu"
-              >
-                ✕
-              </button>
-            </div>
-            <nav className="flex-1 p-4 space-y-2 text-sm">
-              <Link
-                to="/admin/dashboard"
-                onClick={() => setIsMenuOpen(false)}
-                className="block px-3 py-2 rounded-lg hover:bg-slate-800 transition"
-              >
-                Dashboard
-              </Link>
-              <Link
-                to="/admin/deposits"
-                onClick={() => setIsMenuOpen(false)}
-                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-800 transition"
-              >
-                <span className="flex items-center gap-2">
-                  <Wallet size={18} className="text-emerald-400" /> Deposits
-                </span>
-              </Link>
-              <Link
-                to="/admin/agents"
-                onClick={() => setIsMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 transition"
-              >
-                <Users size={18} className="text-blue-400" /> Manage Agents
-              </Link>
-            </nav>
-            <div className="p-4 border-t border-slate-800">
-              <button
-                onClick={() => {
-                  setIsMenuOpen(false);
-                  auth.signOut();
-                }}
-                className="flex items-center gap-2 px-4 py-2 text-red-400 hover:text-red-300 w-full text-sm"
-              >
-                <LogOut size={18} /> Logout
-              </button>
-            </div>
+            <span className="font-semibold text-lg">Manager Portal</span>
           </div>
         </div>
+      </header>
 
-        <main className="flex-1 overflow-auto">
-          <Outlet />
-        </main>
+      {/* Slide-out Drawer (Hidden by default) */}
+      <div
+        className={cn(
+          'fixed inset-0 z-50 transition-opacity duration-300',
+          isMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        )}
+      >
+        {/* Dark Backdrop */}
+        <div
+          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          onClick={() => setIsMenuOpen(false)}
+        />
+        
+        {/* Sidebar Panel */}
+        <div
+          className={cn(
+            "absolute top-0 left-0 bottom-0 w-64 bg-slate-900 text-white shadow-2xl flex flex-col transition-transform duration-300",
+            isMenuOpen ? "translate-x-0" : "-translate-x-full"
+          )}
+        >
+          <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Shield size={20} className="text-blue-400" />
+              <span className="font-semibold text-sm">Navigation</span>
+            </div>
+            <button
+              onClick={() => setIsMenuOpen(false)}
+              className="p-2 rounded-full hover:bg-slate-800 bg-slate-800/50"
+            >
+              ✕
+            </button>
+          </div>
+          <nav className="flex-1 p-4 space-y-2 text-sm overflow-y-auto">
+            <Link
+              to="/admin/dashboard"
+              onClick={() => setIsMenuOpen(false)}
+              className="block px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              Dashboard
+            </Link>
+            <Link
+              to="/admin/deposits"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <Wallet size={18} className="text-emerald-400" /> Pending Deposits
+            </Link>
+            <Link
+              to="/admin/agents"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <Users size={18} className="text-blue-400" /> Manage Agents
+            </Link>
+          </nav>
+          <div className="p-4 border-t border-slate-800">
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                auth.signOut();
+              }}
+              className="flex items-center gap-2 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-950/30 rounded-xl w-full text-sm font-medium transition"
+            >
+              <LogOut size={18} /> Logout
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Main Content Area */}
+      <main className="flex-1 pb-10">
+        <Outlet />
+      </main>
     </div>
   );
 };
 
 const AdminDashboardScreen = () => (
-  <div className="p-4 md:p-8 font-bold text-xl md:text-2xl text-gray-800">
-    Manager Dashboard
+  <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
+    <div>
+      <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Manager Dashboard</h1>
+      <p className="text-slate-500 mt-2 font-medium">Welcome to the manager portal. Select an option below to get started.</p>
+    </div>
+    
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+      <Link 
+        to="/admin/agents" 
+        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition active:scale-[0.98]"
+      >
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-50 p-4 rounded-xl text-blue-600">
+            <Users size={28} />
+          </div>
+          <div>
+            <h3 className="font-bold text-lg text-slate-800">Manage Agents</h3>
+            <p className="text-sm text-slate-500 font-medium">Add, edit, or remove collection agents</p>
+          </div>
+        </div>
+        <ChevronRight className="text-slate-400" />
+      </Link>
+
+      <Link 
+        to="/admin/deposits" 
+        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition active:scale-[0.98]"
+      >
+        <div className="flex items-center gap-4">
+          <div className="bg-emerald-50 p-4 rounded-xl text-emerald-600">
+            <Wallet size={28} />
+          </div>
+          <div>
+            <h3 className="font-bold text-lg text-slate-800">Pending Deposits</h3>
+            <p className="text-sm text-slate-500 font-medium">Review and reconcile cash handovers</p>
+          </div>
+        </div>
+        <ChevronRight className="text-slate-400" />
+      </Link>
+    </div>
   </div>
 );
 
@@ -179,21 +186,17 @@ export default function App() {
       if (u) {
         setUser(u);
 
-        // FIX: Use a real-time listener on the user doc.
-        // If you change the role in Firestore, the app updates instantly.
         unsubscribeDoc = onSnapshot(
           doc(db, 'users', u.uid),
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
-              // Check for both just in case it was typed as 'admin' in the database
               if (data.role === 'agency_manager' || data.role === 'admin') {
                 setUserRole('agency_manager');
               } else {
                 setUserRole('agent');
               }
             } else {
-              // Doc hasn't been created by LoginScreen yet, assume agent for now
               setUserRole('agent');
             }
             setLoading(false);
@@ -222,7 +225,6 @@ export default function App() {
   }, []);
 
   if (showSplash) return <SplashScreen />;
-  // Don't render routes until we know the role
   if (loading) return null;
 
   const getInitialRoute = () => {
@@ -232,18 +234,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route
-          path="/login"
-          element={!user ? <LoginScreen /> : <Navigate to={getInitialRoute()} />}
-        />
-        <Route
-          path="/signup"
-          element={!user ? <SignupScreen /> : <Navigate to={getInitialRoute()} />}
-        />
-        <Route
-          path="/"
-          element={user ? <Navigate to={getInitialRoute()} /> : <Navigate to="/login" />}
-        />
+        <Route path="/login" element={!user ? <LoginScreen /> : <Navigate to={getInitialRoute()} />} />
+        <Route path="/signup" element={!user ? <SignupScreen /> : <Navigate to={getInitialRoute()} />} />
+        <Route path="/" element={user ? <Navigate to={getInitialRoute()} /> : <Navigate to="/login" />} />
 
         {/* MANAGER ROUTES */}
         {userRole === 'agency_manager' && (
@@ -277,10 +270,7 @@ export default function App() {
           </Route>
         )}
 
-        <Route
-          path="*"
-          element={<Navigate to={user ? getInitialRoute() : '/login'} />}
-        />
+        <Route path="*" element={<Navigate to={user ? getInitialRoute() : '/login'} />} />
       </Routes>
     </BrowserRouter>
   );
