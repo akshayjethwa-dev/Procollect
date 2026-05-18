@@ -134,15 +134,17 @@ export default function PendingDepositsScreen() {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8 relative">
+    <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8 relative">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
             <Wallet className="text-emerald-500" size={32} />
             Pending Cash Handovers
           </h1>
-          <p className="text-slate-500 mt-2 font-medium">Review and reconcile cash collected by your agents.</p>
+          <p className="text-slate-500 mt-2 font-medium">
+            Review and reconcile cash collected by your agents.
+          </p>
         </div>
         
         <div className="bg-orange-50 text-orange-600 px-4 py-2 rounded-xl flex items-center space-x-2 border border-orange-100 font-bold">
@@ -172,11 +174,13 @@ export default function PendingDepositsScreen() {
             const isProcessing = processingId === deposit.id;
             
             return (
-              <div key={deposit.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 transition-all hover:shadow-md">
-                
+              <div
+                key={deposit.id}
+                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 transition-all hover:shadow-md"
+              >
                 {/* Info Section */}
                 <div className="flex-1 space-y-3">
-                  <div className="flex items-center justify-between md:justify-start gap-4">
+                  <div className="flex items-center justify-between md:justify-start gap-4 flex-wrap">
                     <div className="flex items-center gap-2 text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
                       <User size={16} className="text-brand-500" />
                       <span className="font-bold text-sm">{deposit.agentName}</span>
@@ -188,8 +192,12 @@ export default function PendingDepositsScreen() {
                   </div>
 
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Amount Received</span>
-                    <span className="text-3xl font-black text-slate-900">{formatCurrency(deposit.amount)}</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      Amount Received
+                    </span>
+                    <span className="text-3xl font-black text-slate-900">
+                      {formatCurrency(deposit.amount)}
+                    </span>
                   </div>
 
                   {deposit.notes && (
@@ -218,7 +226,6 @@ export default function PendingDepositsScreen() {
                     <XCircle size={18} /> Reject
                   </button>
                 </div>
-                
               </div>
             );
           })}

@@ -105,15 +105,15 @@ export default function AgentManagementScreen() {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
+      <div className="flex justify-between items-center gap-3 flex-wrap">
         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
           <Shield className="text-blue-600" />
           Agent Provisioning
         </h1>
         <button 
           onClick={() => { setShowCreateModal(true); setNewCredentials(null); }}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium w-full sm:w-auto justify-center"
         >
           <UserPlus size={18} /> Add New Agent
         </button>
@@ -129,47 +129,55 @@ export default function AgentManagementScreen() {
         <p className="text-gray-500">Loading your agents...</p>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100 text-gray-600 text-sm">
-                <th className="p-4 font-medium">Agent Name</th>
-                <th className="p-4 font-medium">System ID (Login Email)</th>
-                <th className="p-4 font-medium">Phone</th>
-                <th className="p-4 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 text-sm">
-              {agents.map((agent) => (
-                <tr key={agent.id} className="hover:bg-gray-50/50">
-                  <td className="p-4 font-medium text-gray-800">
-                    <Link to={`/admin/agents/${agent.id}`} className="hover:text-blue-600 transition-colors">
-                      {agent.name}
-                    </Link>
-                  </td>
-                  <td className="p-4 text-blue-600">{agent.email}</td>
-                  <td className="p-4 text-gray-600">{agent.phone}</td>
-                  <td className="p-4 flex items-center gap-4">
-                    <Link 
-                      to={`/admin/agents/${agent.id}`}
-                      className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 transition-colors"
-                    >
-                      <Wallet size={16} /> View Ledger
-                    </Link>
-
-                    <button 
-                      onClick={() => setResetModalId(agent.id)}
-                      className="text-gray-500 hover:text-blue-600 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-                    >
-                      <Key size={16} /> Reset Password
-                    </button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-gray-600 text-sm">
+                  <th className="p-4 font-medium">Agent Name</th>
+                  <th className="p-4 font-medium">System ID (Login Email)</th>
+                  <th className="p-4 font-medium">Phone</th>
+                  <th className="p-4 font-medium">Actions</th>
                 </tr>
-              ))}
-              {agents.length === 0 && (
-                <tr><td colSpan={4} className="p-4 text-center text-gray-500">No agents found in your agency.</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-sm">
+                {agents.map((agent) => (
+                  <tr key={agent.id} className="hover:bg-gray-50/50">
+                    <td className="p-4 font-medium text-gray-800">
+                      <Link to={`/admin/agents/${agent.id}`} className="hover:text-blue-600 transition-colors">
+                        {agent.name}
+                      </Link>
+                    </td>
+                    <td className="p-4 text-blue-600">{agent.email}</td>
+                    <td className="p-4 text-gray-600">{agent.phone}</td>
+                    <td className="p-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Link 
+                          to={`/admin/agents/${agent.id}`}
+                          className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 transition-colors"
+                        >
+                          <Wallet size={16} /> View Ledger
+                        </Link>
+
+                        <button 
+                          onClick={() => setResetModalId(agent.id)}
+                          className="text-gray-500 hover:text-blue-600 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                        >
+                          <Key size={16} /> Reset Password
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {agents.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-4 text-center text-gray-500">
+                      No agents found in your agency.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -200,23 +208,51 @@ export default function AgentManagementScreen() {
               <form onSubmit={handleCreateAgent} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                  <input type="text" required value={name} onChange={e => setName(e.target.value)}
-                    className="w-full border p-2 rounded focus:ring focus:ring-blue-200" placeholder="e.g. Ramesh Patel" />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    className="w-full border p-2 rounded focus:ring focus:ring-blue-200"
+                    placeholder="e.g. Ramesh Patel"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                  <input type="tel" required value={phone} onChange={e => setPhone(e.target.value)}
-                    className="w-full border p-2 rounded focus:ring focus:ring-blue-200" placeholder="+91 XXXXX XXXXX" />
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    className="w-full border p-2 rounded focus:ring focus:ring-blue-200"
+                    placeholder="+91 XXXXX XXXXX"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password</label>
-                  <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                    className="w-full border p-2 rounded focus:ring focus:ring-blue-200" minLength={6} />
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full border p-2 rounded focus:ring focus:ring-blue-200"
+                    minLength={6}
+                  />
                 </div>
                 
                 <div className="flex justify-end gap-3 pt-4">
-                  <button type="button" onClick={() => setShowCreateModal(false)} className="text-gray-500 hover:bg-gray-100 px-4 py-2 rounded">Cancel</button>
-                  <button type="submit" disabled={isSubmitting} className="bg-blue-600 text-white px-4 py-2 rounded shadow flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="text-gray-500 hover:bg-gray-100 px-4 py-2 rounded"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="bg-blue-600 text-white px-4 py-2 rounded shadow flex items-center gap-2"
+                  >
                     {isSubmitting ? 'Creating...' : 'Create Account'}
                   </button>
                 </div>
@@ -234,12 +270,29 @@ export default function AgentManagementScreen() {
             <form onSubmit={handleResetPassword} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)}
-                  className="w-full border p-2 rounded" minLength={6} placeholder="Enter new password" />
+                <input
+                  type="password"
+                  required
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full border p-2 rounded"
+                  minLength={6}
+                  placeholder="Enter new password"
+                />
               </div>
               <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setResetModalId(null)} className="text-gray-500 hover:bg-gray-100 px-4 py-2 rounded">Cancel</button>
-                <button type="submit" disabled={isSubmitting} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow">
+                <button
+                  type="button"
+                  onClick={() => setResetModalId(null)}
+                  className="text-gray-500 hover:bg-gray-100 px-4 py-2 rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow"
+                >
                   {isSubmitting ? 'Updating...' : 'Force Reset'}
                 </button>
               </div>
