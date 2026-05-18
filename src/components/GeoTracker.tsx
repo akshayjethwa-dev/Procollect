@@ -1,9 +1,9 @@
-// src/components/GeoTracker.tsx
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { auth, rtdb, rtdbRef, set, getUserAgencyId } from '../lib/firebase';
 
 export default function GeoTracker() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const startTracking = async () => {
@@ -11,12 +11,14 @@ export default function GeoTracker() {
       if (!user) return;
 
       const agencyId = await getUserAgencyId();
-      if (!agencyId) return;
+      if (!agencyId) {
+        console.error("GeoTracker: Could not determine agencyId.");
+        return;
+      }
 
-      // Function to get battery level
       const getBatteryLevel = async () => {
         try {
-          // @ts-ignore - Battery API is not standard in all TS DOM libs
+          // @ts-ignore
           if (navigator.getBattery) {
             // @ts-ignore
             const battery = await navigator.getBattery();
@@ -29,9 +31,14 @@ export default function GeoTracker() {
       };
 
       const pushLocation = () => {
-        if (!navigator.geolocation) return;
+        if (!navigator.geolocation) {
+          setErrorMsg("Geolocation is not supported by your browser.");
+          return;
+        }
 
+        // This automatically triggers the browser's "Allow Location" popup
         navigator.geolocation.getCurrentPosition(async (position) => {
+          setErrorMsg(null); // Clear errors if successful
           const { latitude, longitude } = position.coords;
           const battery = await getBatteryLevel();
           
@@ -43,11 +50,15 @@ export default function GeoTracker() {
             name: user.displayName || 'Unknown Agent'
           };
 
-          // Write to RTDB: locations/{agencyId}/{agentId}
+          // Save to database
           set(rtdbRef(rtdb, `locations/${agencyId}/${user.uid}`), locationData)
-            .catch(err => console.error("Error updating location:", err));
+            .catch(err => console.error("Error updating DB:", err));
+
         }, (error) => {
           console.error("Location error:", error.message);
+          if (error.code === error.PERMISSION_DENIED) {
+             setErrorMsg("Location access denied! Please allow location permissions in your browser settings to stay active.");
+          }
         }, {
           enableHighAccuracy: true,
           timeout: 10000,
@@ -55,10 +66,10 @@ export default function GeoTracker() {
         });
       };
 
-      // Push immediately on load
+      // Run immediately
       pushLocation();
       
-      // Throttle to every 2 minutes (120,000 ms) to save battery
+      // Then run every 2 minutes
       timerRef.current = setInterval(pushLocation, 120000);
     };
 
@@ -69,5 +80,14 @@ export default function GeoTracker() {
     };
   }, []);
 
-  return null; // Silent background component
+  // Show a red warning banner if permissions are denied
+  if (errorMsg) {
+    return (
+      <div className="bg-red-500 text-white text-xs font-medium p-2 text-center w-full z-50">
+        ⚠️ {errorMsg}
+      </div>
+    );
+  }
+
+  return null; // Silent background component if everything is fine
 }
