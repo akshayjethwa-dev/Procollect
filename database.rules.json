@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "locations": {
+      "$agencyId": {
+        
+        ".read": "auth != null",
+        "$agentId": {
+          
+          ".write": "auth != null && auth.uid === $agentId"
+        }
+      }
+    }
+  }
+}

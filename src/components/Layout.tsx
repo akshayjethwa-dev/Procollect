@@ -2,10 +2,14 @@ import { ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Home, Users, BarChart3, User, PlusCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import GeoTracker from './GeoTracker';
 
 export default function Layout() {
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 relative overflow-hidden">
+      {/* Background Geolocation Tracker */}
+      <GeoTracker />
+      
       <main className="flex-1 overflow-y-auto pb-20">
         <Outlet />
       </main>

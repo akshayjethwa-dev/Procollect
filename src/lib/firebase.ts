@@ -16,35 +16,14 @@ import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  addDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  limit, 
-  onSnapshot, 
-  writeBatch,
-  getDocFromCache,
-  getDocFromServer,
-  Timestamp,
-  serverTimestamp,
-  increment,
-  arrayUnion,
-  arrayRemove
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, writeBatch, getDocFromCache, getDocFromServer, Timestamp, serverTimestamp, increment, arrayUnion, arrayRemove
 } from 'firebase/firestore';
 import { 
-  getStorage, 
-  ref as storageRef, 
-  uploadBytesResumable, 
-  getDownloadURL 
+  getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL 
 } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
+// NEW: Import Realtime Database
+import { getDatabase, ref as rtdbRef, set, onValue, off } from 'firebase/database';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -53,7 +32,9 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  // Add databaseURL if your RTDB is outside the default us-central1 or required by config
+  databaseURL: `https://${import.meta.env.VITE_FIREBASE_PROJECT_ID}-default-rtdb.firebaseio.com` 
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -69,21 +50,19 @@ export const db = !getApps().length
 
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
+// NEW: Initialize RTDB
+export const rtdb = getDatabase(app);
 
-// Helper to get the user's agency ID from Custom Claims or Firestore fallback
 export const getUserAgencyId = async (): Promise<string> => {
   const user = auth.currentUser;
-  // Fallback if not logged in
   if (!user) return ''; 
   
   try {
-    // 1. Check custom claims first (ignore if it's 'UNASSIGNED')
     const tokenResult = await getIdTokenResult(user);
     if (tokenResult.claims && tokenResult.claims.agencyId && tokenResult.claims.agencyId !== 'UNASSIGNED') {
       return tokenResult.claims.agencyId as string;
     }
 
-    // 2. Fallback to Firestore (ignore if it's 'UNASSIGNED')
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists() && userDoc.data().agencyId && userDoc.data().agencyId !== 'UNASSIGNED') {
       return userDoc.data().agencyId;
@@ -91,9 +70,6 @@ export const getUserAgencyId = async (): Promise<string> => {
   } catch (error) {
     console.warn("Could not fetch agency ID, defaulting to User ID", error);
   }
-
-  // 3. THE FIX: Default to the user's OWN UID. 
-  // This matches the backend where an independent manager IS the agency.
   return user.uid;
 };
 
@@ -106,35 +82,11 @@ export const checkSubscriptionStatus = async (): Promise<boolean> => {
 };
 
 export {
-  signInWithPopup,
-  GoogleAuthProvider,
-  signOut,
-  onAuthStateChanged,
-  getIdTokenResult,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  addDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-  writeBatch,
-  getDocFromCache,
-  getDocFromServer,
-  Timestamp,
-  serverTimestamp,
-  increment,
-  arrayUnion,
-  arrayRemove,
-  storageRef,
-  uploadBytesResumable,
-  getDownloadURL
+  signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, getIdTokenResult,
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, writeBatch, getDocFromCache, getDocFromServer, Timestamp, serverTimestamp, increment, arrayUnion, arrayRemove,
+  storageRef, uploadBytesResumable, getDownloadURL,
+  // NEW: Export RTDB functions
+  rtdbRef, set, onValue, off
 };
 
 export type { User };

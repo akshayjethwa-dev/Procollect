@@ -27,7 +27,8 @@ import SubmitDepositScreen from './screens/SubmitDepositScreen';
 import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
 import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
 import DepositHistoryScreen from './screens/DepositHistoryScreen';
-import { Shield, Users, LogOut, Wallet, Menu, ChevronRight } from 'lucide-react';
+import LiveMapScreen from './screens/Admin/LiveMapScreen';
+import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin } from 'lucide-react';
 import { cn } from './lib/utils';
 
 const AdminLayout = () => {
@@ -92,6 +93,13 @@ const AdminLayout = () => {
               className="block px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
             >
               Dashboard
+            </Link>
+            <Link
+              to="/admin/map"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <MapPin size={18} className="text-purple-400" /> Live Tracker
             </Link>
             <Link
               to="/admin/deposits"
@@ -246,6 +254,7 @@ export default function App() {
             <Route path="agents" element={<AgentManagementScreen />} />
             <Route path="agents/:id" element={<AgentDetailScreen />} />
             <Route path="deposits" element={<PendingDepositsScreen />} />
+            <Route path="map" element={<LiveMapScreen />} />
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Route>
         )}
