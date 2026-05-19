@@ -22,6 +22,7 @@ import NotificationsScreen from './screens/NotificationsScreen';
 import CheckoutScreen from './screens/CheckoutScreen';
 import Layout from './components/Layout';
 
+import ManagerDashboardScreen from './screens/Admin/ManagerDashboardScreen';
 import AgentManagementScreen from './screens/Admin/AgentManagementScreen';
 import SubmitDepositScreen from './screens/SubmitDepositScreen';
 import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
@@ -138,49 +139,6 @@ const AdminLayout = () => {
   );
 };
 
-const AdminDashboardScreen = () => (
-  <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
-    <div>
-      <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Manager Dashboard</h1>
-      <p className="text-slate-500 mt-2 font-medium">Welcome to the manager portal. Select an option below to get started.</p>
-    </div>
-    
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-      <Link 
-        to="/admin/agents" 
-        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition active:scale-[0.98]"
-      >
-        <div className="flex items-center gap-4">
-          <div className="bg-blue-50 p-4 rounded-xl text-blue-600">
-            <Users size={28} />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg text-slate-800">Manage Agents</h3>
-            <p className="text-sm text-slate-500 font-medium">Add, edit, or remove collection agents</p>
-          </div>
-        </div>
-        <ChevronRight className="text-slate-400" />
-      </Link>
-
-      <Link 
-        to="/admin/deposits" 
-        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition active:scale-[0.98]"
-      >
-        <div className="flex items-center gap-4">
-          <div className="bg-emerald-50 p-4 rounded-xl text-emerald-600">
-            <Wallet size={28} />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg text-slate-800">Pending Deposits</h3>
-            <p className="text-sm text-slate-500 font-medium">Review and reconcile cash handovers</p>
-          </div>
-        </div>
-        <ChevronRight className="text-slate-400" />
-      </Link>
-    </div>
-  </div>
-);
-
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<'agency_manager' | 'agent' | null>(null);
@@ -250,7 +208,7 @@ export default function App() {
         {userRole === 'agency_manager' && (
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" />} />
-            <Route path="dashboard" element={<AdminDashboardScreen />} />
+            <Route path="dashboard" element={<ManagerDashboardScreen />} />
             <Route path="agents" element={<AgentManagementScreen />} />
             <Route path="agents/:id" element={<AgentDetailScreen />} />
             <Route path="deposits" element={<PendingDepositsScreen />} />

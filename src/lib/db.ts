@@ -1,9 +1,22 @@
 // src/lib/db.ts
 import Dexie, { Table } from 'dexie';
 
+// NEW: Agency Table for Multi-tenancy Management
+export interface Agency {
+  id: string;
+  name: string;
+  adminId: string; // UID of the Manager/Admin who created it
+  contactEmail?: string;
+  contactPhone?: string;
+  status: 'active' | 'suspended' | 'inactive';
+  subscriptionPlan: 'trial' | 'pro' | 'enterprise';
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface Customer {
   id: string;
-  agencyId: string; // <-- NEW: Multi-tenancy isolation
+  agencyId: string; 
   name: string;
   mobile: string;
   address: string;
@@ -21,7 +34,7 @@ export interface Customer {
 
 export interface Loan {
   id: string;
-  agencyId: string; // <-- NEW
+  agencyId: string; 
   customerId: string; 
   loanId: string;
   dueAmount: number;
@@ -37,7 +50,7 @@ export interface Loan {
 
 export interface BatchImport {
   id: string;
-  agencyId: string; // <-- NEW
+  agencyId: string; 
   fileName: string;
   filePath: string | null;
   createdAt: string;
@@ -49,7 +62,7 @@ export interface BatchImport {
 
 export interface Visit {
   id: string;
-  agencyId: string; // <-- NEW
+  agencyId: string; 
   customerId: string;
   agentId: string;
   date: string;
@@ -61,7 +74,7 @@ export interface Visit {
 
 export interface FollowUp {
   id: string;
-  agencyId: string; // <-- NEW
+  agencyId: string; 
   customerId: string;
   agentId: string;
   scheduledAt: string;
@@ -73,7 +86,7 @@ export interface FollowUp {
 
 export interface Notification {
   id: string;
-  agencyId: string; // <-- NEW
+  agencyId: string; 
   agentId: string;
   title: string;
   message: string;
@@ -83,19 +96,18 @@ export interface Notification {
 
 export interface UserProfile {
   uid: string;
-  agencyId: string; // <-- NEW: Ties an agent/admin to a workspace
+  agencyId: string; 
   name: string;
   email: string;
   createdAt: string;
   photoURL?: string;
-  role?: 'admin' | 'agency_manager' | 'agent'; // Useful for future role-based checks
+  role?: 'admin' | 'agency_manager' | 'agent'; 
 }
 
-// NEW: Cash Deposit Interface
 export interface CashDeposit {
   id: string;
   agentId: string;
-  agentName: string; // Stored to avoid extra reads
+  agentName: string; 
   agencyId: string;
   amount: number;
   status: 'pending' | 'approved' | 'rejected';
@@ -103,29 +115,31 @@ export interface CashDeposit {
   rejectionReason?: string;
   createdAt: string;
   processedAt?: string;
-  processedBy?: string; // Manager ID who approved/rejected
+  processedBy?: string; 
 }
 
 export class ProCollectDatabase extends Dexie {
+  agencies!: Table<Agency>; // <-- NEW table registered
   customers!: Table<Customer>;
   loans!: Table<Loan>; 
   visits!: Table<Visit>;
   followups!: Table<FollowUp>;
   notifications!: Table<Notification>;
   users!: Table<UserProfile>;
-  cashDeposits!: Table<CashDeposit>; // <-- NEW table registered
+  cashDeposits!: Table<CashDeposit>; 
 
   constructor() {
     super('ProCollectDB');
-    // Bumped version to 4 for cashDeposits and added index for fast querying
-    this.version(4).stores({
+    // Bumped version to 5 for agencies table
+    this.version(5).stores({
+      agencies: 'id, adminId, status', // <-- NEW index
       customers: 'id, agencyId, assignedAgentId, status, mobile',
       loans: 'id, agencyId, customerId, loanId, assignedAgentId',
       visits: 'id, agencyId, customerId, agentId, date',
       followups: 'id, agencyId, customerId, agentId, scheduledAt, status',
       notifications: 'id, agencyId, agentId, sentAt, read',
       users: 'uid, agencyId, email',
-      cashDeposits: 'id, agencyId, agentId, status, createdAt' // <-- NEW indices
+      cashDeposits: 'id, agencyId, agentId, status, createdAt'
     });
   }
 }
