@@ -1,6 +1,8 @@
+// src/screens/SignupScreen.tsx
 import { useState } from 'react';
 import { UserPlus, ShieldCheck, Mail, Lock, User, Phone, Eye, EyeOff } from 'lucide-react';
-import { auth, db, doc, setDoc } from '../lib/firebase';
+// Added 'collection' to imports
+import { auth, db, doc, setDoc, collection } from '../lib/firebase';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { Link } from 'react-router-dom';
 
@@ -16,7 +18,6 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
 
   const validatePassword = (pass: string) => {
-    // Min 8 chars, 1 uppercase, 1 number, 1 special character
     const regex = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/;
     return regex.test(pass);
   };
@@ -40,15 +41,45 @@ export default function SignupScreen() {
       await updateProfile(user, { displayName: name });
 
       // 3. Create Firestore User Document
-      // FIX: Default role changed from 'manager' to 'agent' per schema update
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         name: name,
         phone: phone,
         email: email,
-        role: 'agent', // <--- Updated role
+        role: 'independent_agent', 
+        agencyId: user.uid,        
         createdAt: new Date().toISOString(),
         active: true
+      });
+
+      // 4. PRE-SEED DEFAULT LOAN TEMPLATE/CAMPAIGN
+      // Create a reference with an auto-generated ID in the 'templates' collection
+      const templateRef = doc(collection(db, 'templates'));
+      
+      await setDoc(templateRef, {
+        id: templateRef.id,
+        agencyId: user.uid, // Ties this template to the new Independent Agent
+        name: "Default Loan Collection",
+        type: "loan",
+        schema: {
+          primaryDisplayField: "customerName",
+          secondaryDisplayField: "loanId",
+          fields: [
+            { key: "customerName", label: "Name", type: "text" },
+            { key: "mobile", label: "Mobile", type: "phone" },
+            { key: "loanId", label: "Loan ID", type: "text" },
+            { key: "totalDueAmount", label: "Due Amount", type: "currency" },
+            { key: "dueDate", label: "Due Date", type: "date" }
+          ]
+        },
+        actionConfig: {
+          statuses: ["Pending", "Promise to Pay", "Partial Payment", "Full Payment", "Refused"],
+          requiresLocation: true,
+          requiresPhoto: false,
+          nextFollowUpMandatoryFor: ["Promise to Pay", "Pending"]
+        },
+        isDefault: true,
+        createdAt: new Date().toISOString()
       });
 
     } catch (e: any) {
@@ -70,7 +101,7 @@ export default function SignupScreen() {
           </div>
           <div>
             <h1 className="text-3xl font-black text-gray-900 tracking-tight">Create Account</h1>
-            <p className="text-gray-500 font-medium tracking-tight mt-1">Register as an agent to get started</p>
+            <p className="text-gray-500 font-medium tracking-tight mt-1">Register as an independent agent to get started</p>
           </div>
         </div>
 

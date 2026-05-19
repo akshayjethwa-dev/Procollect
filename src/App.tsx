@@ -29,10 +29,11 @@ import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
 import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
 import DepositHistoryScreen from './screens/DepositHistoryScreen';
 import LiveMapScreen from './screens/Admin/LiveMapScreen';
-import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin } from 'lucide-react';
+import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home } from 'lucide-react';
 import { cn } from './lib/utils';
 
-const AdminLayout = () => {
+// Accept userRole as a prop
+const AdminLayout = ({ userRole }: { userRole: string | null }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
@@ -116,6 +117,19 @@ const AdminLayout = () => {
             >
               <Users size={18} className="text-blue-400" /> Manage Agents
             </Link>
+
+            {/* NEW: Switch Button for Independent Agents */}
+            {userRole === 'independent_agent' && (
+              <div className="pt-4 mt-4 border-t border-slate-800">
+                <Link
+                  to="/dashboard"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-900/40 text-blue-300 rounded-xl hover:bg-blue-800/50 transition font-medium border border-blue-800/30"
+                >
+                  <Home size={18} /> Switch to Field App
+                </Link>
+              </div>
+            )}
           </nav>
           <div className="p-4 border-t border-slate-800">
             <button
@@ -141,7 +155,8 @@ const AdminLayout = () => {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<'agency_manager' | 'agent' | null>(null);
+  // Expand Role State
+  const [userRole, setUserRole] = useState<'agency_manager' | 'independent_agent' | 'agent' | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
 
@@ -157,8 +172,11 @@ export default function App() {
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
+              // Classify role accurately
               if (data.role === 'agency_manager' || data.role === 'admin') {
                 setUserRole('agency_manager');
+              } else if (data.role === 'independent_agent') {
+                setUserRole('independent_agent');
               } else {
                 setUserRole('agent');
               }
@@ -194,7 +212,9 @@ export default function App() {
   if (loading) return null;
 
   const getInitialRoute = () => {
-    return userRole === 'agency_manager' ? '/admin/dashboard' : '/dashboard';
+    if (userRole === 'agency_manager') return '/admin/dashboard';
+    if (userRole === 'independent_agent') return '/admin/dashboard'; // Default land them in manager portal
+    return '/dashboard';
   };
 
   return (
@@ -204,9 +224,9 @@ export default function App() {
         <Route path="/signup" element={!user ? <SignupScreen /> : <Navigate to={getInitialRoute()} />} />
         <Route path="/" element={user ? <Navigate to={getInitialRoute()} /> : <Navigate to="/login" />} />
 
-        {/* MANAGER ROUTES */}
-        {userRole === 'agency_manager' && (
-          <Route path="/admin" element={<AdminLayout />}>
+        {/* MANAGER & INDEPENDENT AGENT ROUTES */}
+        {(userRole === 'agency_manager' || userRole === 'independent_agent') && (
+          <Route path="/admin" element={<AdminLayout userRole={userRole} />}>
             <Route index element={<Navigate to="dashboard" />} />
             <Route path="dashboard" element={<ManagerDashboardScreen />} />
             <Route path="agents" element={<AgentManagementScreen />} />
@@ -217,9 +237,10 @@ export default function App() {
           </Route>
         )}
 
-        {/* AGENT ROUTES */}
-        {userRole === 'agent' && (
-          <Route path="/" element={<Layout />}>
+        {/* AGENT & INDEPENDENT AGENT ROUTES */}
+        {/* Notice we pass userRole to Layout so we can show the top banner */}
+        {(userRole === 'agent' || userRole === 'independent_agent') && (
+          <Route path="/" element={<Layout userRole={userRole} />}>
             <Route index element={<Navigate to="dashboard" />} />
             <Route path="dashboard" element={<DashboardScreen />} />
             <Route path="customers" element={<CustomerListScreen />} />

@@ -101,7 +101,8 @@ export interface UserProfile {
   email: string;
   createdAt: string;
   photoURL?: string;
-  role?: 'admin' | 'agency_manager' | 'agent'; 
+  // UPDATED: Added 'independent_agent' role
+  role?: 'admin' | 'agency_manager' | 'agent' | 'independent_agent'; 
 }
 
 export interface CashDeposit {
@@ -119,7 +120,7 @@ export interface CashDeposit {
 }
 
 export class ProCollectDatabase extends Dexie {
-  agencies!: Table<Agency>; // <-- NEW table registered
+  agencies!: Table<Agency>; 
   customers!: Table<Customer>;
   loans!: Table<Loan>; 
   visits!: Table<Visit>;
@@ -130,9 +131,8 @@ export class ProCollectDatabase extends Dexie {
 
   constructor() {
     super('ProCollectDB');
-    // Bumped version to 5 for agencies table
     this.version(5).stores({
-      agencies: 'id, adminId, status', // <-- NEW index
+      agencies: 'id, adminId, status', 
       customers: 'id, agencyId, assignedAgentId, status, mobile',
       loans: 'id, agencyId, customerId, loanId, assignedAgentId',
       visits: 'id, agencyId, customerId, agentId, date',

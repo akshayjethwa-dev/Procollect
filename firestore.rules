@@ -15,7 +15,7 @@ service cloud.firestore {
 
     // Core Multi-Tenancy validation function
     function isSameAgency(documentAgencyId) {
-      // FIX 1: Allow if the document belongs to the user's own UID (manager acting as independent agency)
+      // Allow if the document belongs to the user's own UID (manager or independent agent)
       return documentAgencyId == 'UNASSIGNED' ||
              documentAgencyId == request.auth.uid ||
              (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
@@ -28,11 +28,10 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         // A user can read their own profile
         request.auth.uid == userId || 
-        // OR an Admin/Manager can read profiles within their SAME agency
+        // OR an Admin/Manager/Independent Agent can read profiles within their SAME agency
         (
-          // FIX 2: Check both the token AND fallback to the database in case the token is stale
-          (request.auth.token.role in ['agency_manager', 'admin'] || 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'admin']) &&
+          (request.auth.token.role in ['agency_manager', 'admin', 'independent_agent'] || 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'admin', 'independent_agent']) &&
           isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
         )
       );
@@ -92,8 +91,30 @@ service cloud.firestore {
     match /cashDeposits/{depositId} {
       allow create: if isAuthenticated() && request.resource.data.agentId == request.auth.uid;
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      // FIX 3: Ensure update rules also handle stale auth tokens
-      allow update: if isAuthenticated() && (request.auth.token.role == 'agency_manager' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'agency_manager') && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+      // Allowed updates for agency managers and independent agents processing their own/their agents' deposits
+      allow update: if isAuthenticated() && 
+                    (request.auth.token.role in ['agency_manager', 'independent_agent'] || 
+                     get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'independent_agent']) && 
+                    isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+    }
+
+    // =========================================================
+    // NEW: Rules for Campaigns and Templates (Independent Agent Auth Model)
+    // =========================================================
+    match /campaigns/{campaignId} {
+      allow read: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+      allow create, update, delete: if isAuthenticated() 
+        && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
+        && (request.auth.token.role in ['agency_manager', 'independent_agent', 'admin'] || 
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'independent_agent', 'admin']);
+    }
+
+    match /templates/{templateId} {
+      allow read: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+      allow create, update, delete: if isAuthenticated() 
+        && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
+        && (request.auth.token.role in ['agency_manager', 'independent_agent', 'admin'] || 
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'independent_agent', 'admin']);
     }
 
     // Default deny for all other collections

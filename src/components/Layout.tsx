@@ -1,15 +1,33 @@
+// src/components/Layout.tsx
 import { ReactNode } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
-import { Home, Users, BarChart3, User, PlusCircle } from 'lucide-react';
+import { NavLink, Outlet, Link } from 'react-router-dom';
+import { Home, Users, BarChart3, User, PlusCircle, Shield } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GeoTracker from './GeoTracker';
 
-export default function Layout() {
+// Accept userRole as a prop
+export default function Layout({ userRole }: { userRole?: string | null }) {
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 relative overflow-hidden">
       {/* Background Geolocation Tracker */}
       <GeoTracker />
       
+      {/* NEW: Top banner for Independent Agents to switch back to Admin */}
+      {userRole === 'independent_agent' && (
+        <div className="bg-slate-900 text-white px-4 py-2.5 flex justify-between items-center z-40 relative shadow-md">
+          <div className="flex items-center gap-2">
+            <Shield size={16} className="text-blue-400" />
+            <span className="text-xs font-semibold text-slate-300">Independent Mode</span>
+          </div>
+          <Link 
+            to="/admin/dashboard" 
+            className="text-xs bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-md font-medium transition-colors shadow-sm"
+          >
+            Manager Portal →
+          </Link>
+        </div>
+      )}
+
       <main className="flex-1 overflow-y-auto pb-20">
         <Outlet />
       </main>
