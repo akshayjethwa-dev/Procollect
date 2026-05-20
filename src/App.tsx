@@ -32,9 +32,10 @@ import DepositHistoryScreen from './screens/DepositHistoryScreen';
 import LiveMapScreen from './screens/Admin/LiveMapScreen';
 import CampaignBuilderScreen from './screens/Admin/CampaignBuilderScreen'; 
 import RecordAssignmentScreen from './screens/Admin/RecordAssignmentScreen'; 
+import LeaderboardScreen from './screens/Admin/LeaderboardScreen';
 
 // ADDED: FileUp for the Import link icon
-import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home, LayoutTemplate, ClipboardList, FileUp } from 'lucide-react'; 
+import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home, LayoutTemplate, ClipboardList, FileUp, Trophy } from 'lucide-react'; 
 import { cn } from './lib/utils';
 
 // Accept userRole as a prop
@@ -100,6 +101,13 @@ const AdminLayout = ({ userRole }: { userRole: string | null }) => {
               className="block px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
             >
               Dashboard
+            </Link>
+            <Link
+              to="/admin/leaderboard"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <Trophy size={18} className="text-yellow-400" /> Leaderboard
             </Link>
             <Link
               to="/admin/map"
@@ -265,6 +273,7 @@ export default function App() {
             
             {/* NEW: Exposing Import Screen to Manager Routes */}
             <Route path="import" element={<ImportScreen />} />
+            <Route path="leaderboard" element={<LeaderboardScreen />} />
 
             {/* Record Assignment Route */}
             <Route path="assignments" element={<RecordAssignmentScreen />} />
