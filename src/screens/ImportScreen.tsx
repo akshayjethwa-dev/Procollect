@@ -1,12 +1,14 @@
+// src/screens/ImportScreen.tsx
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FileUp, Loader2, AlertCircle, Image as ImageIcon, AlertTriangle, Edit2, Check, X, LayoutTemplate } from 'lucide-react';
+import { FileUp, Loader2, AlertCircle, Image as ImageIcon, AlertTriangle, Edit2, Check, X, LayoutTemplate, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { extractDataFromPDF } from '../services/geminiService';
 import { db, auth, collection, doc, writeBatch, getDocs, query, where, setDoc } from '../lib/firebase';
 import { getUserAgencyId } from '../lib/firebase';
+import { getDoc } from 'firebase/firestore'; 
 import { uploadFieldDocument } from '../lib/storage';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../lib/utils';
@@ -22,14 +24,16 @@ export default function ImportScreen() {
   const [extractionStatus, setExtractionStatus] = useState("Processing...");
   const navigate = useNavigate();
 
-  // --- NEW: Template / Campaign State ---
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-
   const [existingLoansInfo, setExistingLoansInfo] = useState<Map<string, { batchId: string }>>(new Map());
   
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
+
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [agents, setAgents] = useState<any[]>([]);
+  const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>('');
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -39,9 +43,21 @@ export default function ImportScreen() {
         const rawAgencyId = await getUserAgencyId();
         const agencyId = rawAgencyId || 'UNASSIGNED';
 
-        // 1. Fetch Existing Data for Duplicates Check
+        const userDocRef = doc(db, 'users', auth.currentUser.uid);
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists()) {
+          setCurrentUserRole(userSnap.data().role);
+        }
+
+        const agentsQuery = query(collection(db, 'users'), where('agencyId', '==', agencyId));
+        const agentsSnap = await getDocs(agentsQuery);
+        const loadedAgents = agentsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() as any }))
+          .filter((u: any) => u.role === 'agent' || u.role === 'independent_agent');
+        setAgents(loadedAgents);
+
         const infoMap = new Map();
-        const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
+        const existingCustQuery = query(collection(db, 'customers'), where('agencyId', '==', agencyId));
         const existingCustDocs = await getDocs(existingCustQuery);
         
         existingCustDocs.docs.forEach(d => {
@@ -52,13 +68,11 @@ export default function ImportScreen() {
         });
         setExistingLoansInfo(infoMap);
 
-        // 2. Fetch Campaigns / Templates for the dropdown
         const campaignsRef = collection(db, 'campaigns');
         const q = query(campaignsRef, where('agencyId', '==', agencyId));
         const snapshot = await getDocs(q);
         const loadedTemplates = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
 
-        // Sort: Default templates first, then alphabetically
         loadedTemplates.sort((a, b) => {
           if (a.isDefault && !b.isDefault) return -1;
           if (!a.isDefault && b.isDefault) return 1;
@@ -67,12 +81,10 @@ export default function ImportScreen() {
 
         setTemplates(loadedTemplates);
         
-        // Auto-select the first template (which will be the default if one exists)
         if (loadedTemplates.length > 0) {
           const userDefault = loadedTemplates.find(t => t.isDefault);
           setSelectedTemplateId(userDefault ? userDefault.id : 'system-default-loan');
         } else {
-          // Fallback if they haven't created any templates yet
           setSelectedTemplateId('system-default-loan');
         }
 
@@ -112,6 +124,7 @@ export default function ImportScreen() {
       dueAmount: Number(row['Due Amount'] || row['EMI'] || row['emiAmount'] || row['amount']) || 0,
       dueDate: row['Due Date'] || row['dueDate'] || new Date().toISOString().split('T')[0],
       needsReview: false,
+      assignedAgentId: '', 
     })).filter(item => item.loanId && item.name !== 'Unknown');
   };
 
@@ -179,7 +192,7 @@ export default function ImportScreen() {
           throw new Error("No data found in this document. Please ensure it contains valid loan records.");
         }
 
-        setExtractedData(data.map(d => ({ ...d, documentUrl: url, documentPath: path })));
+        setExtractedData(data.map(d => ({ ...d, assignedAgentId: '', documentUrl: url, documentPath: path })));
       }
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred.");
@@ -224,13 +237,17 @@ export default function ImportScreen() {
       const rawAgencyId = await getUserAgencyId();
       const agencyId = rawAgencyId || 'UNASSIGNED';
 
+      let assignToAgentId: string | null = null;
+      if (currentUserRole === 'independent_agent') {
+        assignToAgentId = auth.currentUser.uid;
+      }
+
       const finalDataToImport = extractedData.filter(item => !existingLoansInfo.has(String(item.loanId)));
 
       if (finalDataToImport.length === 0) {
         throw new Error("All items in this list are already in your database (duplicate Loan IDs).");
       }
 
-      // --- CREATE BATCH METADATA DOCUMENT ---
       const batchDocRef = doc(collection(db, 'batches'));
       const batchData = {
         id: batchDocRef.id,
@@ -246,13 +263,14 @@ export default function ImportScreen() {
 
       await setDoc(batchDocRef, batchData);
 
-      // --- IMPORT FLAT LOANS DIRECTLY TO CUSTOMERS COLLECTION ---
       let batch = writeBatch(db);
       let operationCount = 0;
 
       for (const item of finalDataToImport) {
         const customerDocRef = doc(collection(db, 'customers'));
         
+        const finalAgentId = item.assignedAgentId || bulkAssignAgentId || assignToAgentId || null;
+
         batch.set(customerDocRef, {
           id: customerDocRef.id,
           agencyId, 
@@ -260,19 +278,14 @@ export default function ImportScreen() {
           mobile: item.mobile || '',
           address: item.address || '', 
           loanId: item.loanId || '',
-          
-          // --- NEW: Attach the Campaign/Template ID to the record ---
           campaignId: selectedTemplateId,
-
-          // Support both legacy and new aggregate fields to keep the UI fully backwards compatible
           dueAmount: Number(item.dueAmount) || 0,
           totalDueAmount: Number(item.dueAmount) || 0,
           dueDate: item.dueDate || new Date().toISOString().split('T')[0],
-          
           receivedAmount: 0,
           totalReceivedAmount: 0,
           status: 'Pending',
-          assignedAgentId: auth.currentUser?.uid || null,
+          assignedAgentId: finalAgentId, 
           batchId: batchDocRef.id,
           createdAt: new Date().toISOString(),
           needsReview: item.needsReview || false
@@ -280,7 +293,6 @@ export default function ImportScreen() {
         
         operationCount++;
 
-        // Commit chunk if we reach Firebase batch limits
         if (operationCount > 450) {
           await batch.commit();
           batch = writeBatch(db);
@@ -288,12 +300,20 @@ export default function ImportScreen() {
         }
       }
 
-      // Commit any remaining operations
       if (operationCount > 0) {
         await batch.commit();
       }
 
-      navigate('/customers');
+      // --- ROUTING LOGIC UPDATE ---
+      // Send Managers back to the manager suite (assignments), Agents to their field app (customers)
+      const isManager = currentUserRole === 'agency_manager' || currentUserRole === 'admin';
+      
+      if (isManager) {
+        navigate('/admin/assignments');
+      } else {
+        navigate('/customers');
+      }
+
     } catch (e: any) {
       handleFirestoreError(e, OperationType.WRITE, 'customers');
       setError(e.message || "An error occurred while saving to the database.");
@@ -306,9 +326,9 @@ export default function ImportScreen() {
     ? `Uploading securely... ${uploadProgress}%`
     : extractionStatus;
 
-  // Calculate stats for UI using Map
   const duplicateCount = extractedData.filter(item => existingLoansInfo.has(String(item.loanId))).length;
   const validCount = extractedData.length - duplicateCount;
+  const isManager = currentUserRole === 'agency_manager' || currentUserRole === 'admin';
 
   return (
     <div className="p-6 space-y-6 pb-24">
@@ -317,7 +337,6 @@ export default function ImportScreen() {
         <p className="text-sm text-slate-500 font-medium">Upload Documents, Images, or Excel sheets</p>
       </div>
 
-      {/* --- NEW: Template Selector Section --- */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
         <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-wider">
           <LayoutTemplate size={14} className="text-brand-500" />
@@ -328,11 +347,9 @@ export default function ImportScreen() {
           onChange={(e) => setSelectedTemplateId(e.target.value)}
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-500 outline-none font-semibold text-slate-700 transition"
         >
-          {/* ALWAYS show the uneditable System Default */}
           <option value="system-default-loan" className="font-bold text-slate-900">
             ⭐ System Default: Loan Collection
           </option>
-          
           {templates.map(t => (
             <option key={t.id} value={t.id}>
               {t.name} {t.isDefault ? '(Your Custom Default)' : ''}
@@ -401,19 +418,6 @@ export default function ImportScreen() {
                 />
               </div>
             )}
-
-            {uploadProgress === 100 && (
-              <div className="flex space-x-1.5 mt-2">
-                {[0, 1, 2].map(i => (
-                  <motion.div
-                    key={i}
-                    className="w-2 h-2 bg-brand-400 rounded-full"
-                    animate={{ opacity: [0.3, 1, 0.3], y: [0, -4, 0] }}
-                    transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
-                  />
-                ))}
-              </div>
-            )}
           </motion.div>
         )}
 
@@ -434,23 +438,44 @@ export default function ImportScreen() {
                 )}
               </div>
               <button
-                onClick={() => { setExtractedData([]); setFile(null); }}
+                onClick={() => { setExtractedData([]); setFile(null); setBulkAssignAgentId(''); }}
                 className="text-brand-600 font-bold text-sm bg-brand-50 px-3 py-1.5 rounded-lg hover:bg-brand-100"
               >
                 Clear
               </button>
             </div>
 
+            {isManager && (
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                <div className="w-full sm:w-auto flex-1">
+                  <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-wider mb-1">
+                    <Users size={14} className="text-brand-500" />
+                    Assign All Records To (Optional)
+                  </label>
+                  <select
+                    value={bulkAssignAgentId}
+                    onChange={(e) => setBulkAssignAgentId(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none font-semibold text-slate-700 w-full sm:max-w-md"
+                  >
+                    <option value="">Leave Unassigned (Distribute Later)</option>
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.email})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 pb-10">
               {extractedData.map((item, i) => {
                 const isEditing = editingIndex === i;
                 const activeData = isEditing ? editForm : item;
-                
-                // Fetch duplicate info from the Map
                 const duplicateInfo = existingLoansInfo.get(String(activeData.loanId));
                 const isDuplicate = !!duplicateInfo;
 
-                // --- EDIT MODE VIEW ---
+                const effectiveAgentId = activeData.assignedAgentId || bulkAssignAgentId;
+                const assignedAgentName = effectiveAgentId ? agents.find(a => a.id === effectiveAgentId)?.name : null;
+
                 if (isEditing) {
                   return (
                     <div key={i} className="bg-white p-4 rounded-2xl border-2 border-brand-500 shadow-md space-y-3">
@@ -462,44 +487,53 @@ export default function ImportScreen() {
                           </span>
                         )}
                       </div>
-                      
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="col-span-2">
+                        <div className="col-span-2 sm:col-span-1">
                           <label className="text-[10px] font-bold text-slate-500 uppercase">Customer Name</label>
                           <input type="text" value={editForm.name} onChange={e => handleFormChange('name', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                         </div>
-                        
-                        <div>
+                        <div className="col-span-2 sm:col-span-1">
                           <label className="text-[10px] font-bold text-slate-500 uppercase">Loan ID</label>
                           <input type="text" value={editForm.loanId} onChange={e => handleFormChange('loanId', e.target.value)} className={`w-full mt-1 px-3 py-2 bg-slate-50 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 ${isDuplicate ? 'border-red-400 text-red-700' : 'border-slate-200'}`} />
                         </div>
-                        
-                        <div>
+                        <div className="col-span-2 sm:col-span-1">
                           <label className="text-[10px] font-bold text-slate-500 uppercase">Mobile</label>
                           <input type="text" value={editForm.mobile} onChange={e => handleFormChange('mobile', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                         </div>
-
-                        <div>
+                        <div className="col-span-2 sm:col-span-1">
                           <label className="text-[10px] font-bold text-slate-500 uppercase">Due Amount</label>
                           <input type="number" value={editForm.dueAmount} onChange={e => handleFormChange('dueAmount', Number(e.target.value))} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                         </div>
-
-                        <div>
+                        <div className="col-span-2 sm:col-span-1">
                           <label className="text-[10px] font-bold text-slate-500 uppercase">Due Date</label>
                           <input type="date" value={editForm.dueDate} onChange={e => handleFormChange('dueDate', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                         </div>
+                        
+                        {isManager && (
+                          <div className="col-span-2 sm:col-span-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Override Assignment</label>
+                            <select 
+                              value={editForm.assignedAgentId || ''} 
+                              onChange={e => handleFormChange('assignedAgentId', e.target.value)} 
+                              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            >
+                              <option value="">{bulkAssignAgentId ? 'Use Bulk Assign' : 'Leave Unassigned'}</option>
+                              {agents.map(a => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
 
                         <div className="col-span-2">
                           <label className="text-[10px] font-bold text-slate-500 uppercase">Address</label>
                           <input type="text" value={editForm.address} onChange={e => handleFormChange('address', e.target.value)} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                         </div>
-
                         <div className="col-span-2 flex items-center space-x-2 mt-1">
                           <input type="checkbox" id={`review-${i}`} checked={editForm.needsReview} onChange={e => handleFormChange('needsReview', e.target.checked)} className="w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500" />
                           <label htmlFor={`review-${i}`} className="text-sm font-medium text-slate-700 cursor-pointer">Needs Manual Review Flag</label>
                         </div>
                       </div>
-
                       <div className="flex justify-end space-x-2 mt-4 pt-4 border-t border-slate-100">
                         <button onClick={handleCancelEdit} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 flex items-center">
                           <X size={14} className="mr-1" /> Cancel
@@ -512,7 +546,6 @@ export default function ImportScreen() {
                   );
                 }
 
-                // --- READ-ONLY VIEW ---
                 return (
                   <div
                     key={i}
@@ -525,7 +558,7 @@ export default function ImportScreen() {
                     }`}
                   >
                     <div className="flex-1">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center flex-wrap gap-2 mb-1">
                         <h4 className={`font-bold ${isDuplicate ? 'text-red-900 line-through' : 'text-slate-900'}`}>
                           {item.name}
                         </h4>
@@ -539,7 +572,14 @@ export default function ImportScreen() {
                             Duplicate
                           </span>
                         )}
+                        
+                        {!isDuplicate && assignedAgentName && (
+                          <span className="flex items-center text-[10px] bg-blue-50 border border-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                            <Users size={10} className="mr-1" /> {assignedAgentName}
+                          </span>
+                        )}
                       </div>
+                      
                       <p className="text-xs text-slate-500 font-medium mt-0.5">
                         <span className={isDuplicate ? 'text-red-500 font-bold' : ''}>{item.loanId}</span> • {item.mobile}
                       </p>
@@ -557,11 +597,9 @@ export default function ImportScreen() {
                           Due: {item.dueDate}
                         </div>
                       </div>
-                      
                       <button 
                         onClick={() => handleEditClick(i, item)}
                         className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors border border-transparent hover:border-brand-200"
-                        title="Edit Row"
                       >
                         <Edit2 size={16} />
                       </button>

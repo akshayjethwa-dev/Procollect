@@ -1,3 +1,4 @@
+// src/App.tsx
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -29,9 +30,11 @@ import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
 import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
 import DepositHistoryScreen from './screens/DepositHistoryScreen';
 import LiveMapScreen from './screens/Admin/LiveMapScreen';
-import CampaignBuilderScreen from './screens/Admin/CampaignBuilderScreen'; // <-- NEW IMPORT
+import CampaignBuilderScreen from './screens/Admin/CampaignBuilderScreen'; 
+import RecordAssignmentScreen from './screens/Admin/RecordAssignmentScreen'; 
 
-import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home, LayoutTemplate } from 'lucide-react'; // <-- ADDED LayoutTemplate
+// ADDED: FileUp for the Import link icon
+import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home, LayoutTemplate, ClipboardList, FileUp } from 'lucide-react'; 
 import { cn } from './lib/utils';
 
 // Accept userRole as a prop
@@ -105,6 +108,25 @@ const AdminLayout = ({ userRole }: { userRole: string | null }) => {
             >
               <MapPin size={18} className="text-purple-400" /> Live Tracker
             </Link>
+
+            {/* NEW: Manager Import Screen Link */}
+            <Link
+              to="/admin/import"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <FileUp size={18} className="text-green-400" /> Import Collections
+            </Link>
+            
+            {/* Bulk Record Assignments */}
+            <Link
+              to="/admin/assignments"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <ClipboardList size={18} className="text-pink-400" /> Assign Records
+            </Link>
+
             <Link
               to="/admin/deposits"
               onClick={() => setIsMenuOpen(false)}
@@ -120,7 +142,7 @@ const AdminLayout = ({ userRole }: { userRole: string | null }) => {
               <Users size={18} className="text-blue-400" /> Manage Agents
             </Link>
 
-            {/* NEW: Workflow Templates Link */}
+            {/* Workflow Templates Link */}
             <Link
               to="/admin/campaigns"
               onClick={() => setIsMenuOpen(false)}
@@ -240,12 +262,17 @@ export default function App() {
           <Route path="/admin" element={<AdminLayout userRole={userRole} />}>
             <Route index element={<Navigate to="dashboard" />} />
             <Route path="dashboard" element={<ManagerDashboardScreen />} />
+            
+            {/* NEW: Exposing Import Screen to Manager Routes */}
+            <Route path="import" element={<ImportScreen />} />
+
+            {/* Record Assignment Route */}
+            <Route path="assignments" element={<RecordAssignmentScreen />} />
+
             <Route path="agents" element={<AgentManagementScreen />} />
             <Route path="agents/:id" element={<AgentDetailScreen />} />
             <Route path="deposits" element={<PendingDepositsScreen />} />
             <Route path="map" element={<LiveMapScreen />} />
-            
-            {/* NEW: Workflow Templates Route */}
             <Route path="campaigns" element={<CampaignBuilderScreen />} />
             
             <Route path="*" element={<Navigate to="dashboard" />} />
@@ -253,7 +280,6 @@ export default function App() {
         )}
 
         {/* AGENT & INDEPENDENT AGENT ROUTES */}
-        {/* Notice we pass userRole to Layout so we can show the top banner */}
         {(userRole === 'agent' || userRole === 'independent_agent') && (
           <Route path="/" element={<Layout userRole={userRole} />}>
             <Route index element={<Navigate to="dashboard" />} />
