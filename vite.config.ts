@@ -16,6 +16,8 @@ export default defineConfig(({mode}) => {
         workbox: {
           // Cache all static assets required for offline rendering
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          // Increase the limit to 4 MB to fix the Workbox error
+          maximumFileSizeToCacheInBytes: 4194304,
         },
         manifest: {
           name: 'ProCollect Meta',
@@ -48,6 +50,18 @@ export default defineConfig(({mode}) => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+    },
+    // Added Chunk Splitting
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              return 'vendor';
+            }
+          }
+        }
+      }
     }
   };
 });
