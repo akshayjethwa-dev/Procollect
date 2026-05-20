@@ -50,6 +50,15 @@ service cloud.firestore {
                     && (request.resource.data.assignedAgentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')))
                     && isSubscribed();
       allow delete: if false; 
+
+      // =========================================================
+      // NEW: Rules for Assignment History Subcollection
+      // =========================================================
+      match /assignmentHistory/{historyId} {
+        // Allows read/write if the user is in the same agency as the parent customer document
+        allow read, write: if isAuthenticated() && 
+          isSameAgency(get(/databases/$(database)/documents/customers/$(customerId)).data.get('agencyId', 'UNASSIGNED'));
+      }
     }
 
     // Rules for Batches
@@ -102,17 +111,14 @@ service cloud.firestore {
     // =========================================================
     match /campaigns/{campaignId} {
       allow read: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
-      
       // Separated create, update, and delete to prevent "request.resource is null" crashes
       allow create: if isAuthenticated() 
         && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
         && hasManagerRole();
-        
       allow update: if isAuthenticated() 
         && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
         && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
         && hasManagerRole();
-        
       allow delete: if isAuthenticated() 
         && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
         && hasManagerRole();
@@ -120,16 +126,13 @@ service cloud.firestore {
 
     match /templates/{templateId} {
       allow read: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
-      
       allow create: if isAuthenticated() 
         && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
         && hasManagerRole();
-        
       allow update: if isAuthenticated() 
         && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
         && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
         && hasManagerRole();
-        
       allow delete: if isAuthenticated() 
         && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
         && hasManagerRole();
