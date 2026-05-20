@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FileUp, Loader2, AlertCircle, Image as ImageIcon, AlertTriangle, Edit2, Check, X } from 'lucide-react';
+import { FileUp, Loader2, AlertCircle, Image as ImageIcon, AlertTriangle, Edit2, Check, X, LayoutTemplate } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -22,35 +22,66 @@ export default function ImportScreen() {
   const [extractionStatus, setExtractionStatus] = useState("Processing...");
   const navigate = useNavigate();
 
+  // --- NEW: Template / Campaign State ---
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+
   const [existingLoansInfo, setExistingLoansInfo] = useState<Map<string, { batchId: string }>>(new Map());
   
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
 
   useEffect(() => {
-    const fetchExistingData = async () => {
-      if (auth.currentUser) {
-        try {
-          const infoMap = new Map();
+    const fetchInitialData = async () => {
+      if (!auth.currentUser) return;
+      
+      try {
+        const rawAgencyId = await getUserAgencyId();
+        const agencyId = rawAgencyId || 'UNASSIGNED';
 
-          // Fetch all flat customers to check for existing Loan IDs
-          const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
-          const existingCustDocs = await getDocs(existingCustQuery);
-          
-          existingCustDocs.docs.forEach(d => {
-            const data = d.data() as any; 
-            if (data.loanId) {
-              infoMap.set(String(data.loanId), { batchId: data.batchId || 'Legacy' });
-            }
-          });
+        // 1. Fetch Existing Data for Duplicates Check
+        const infoMap = new Map();
+        const existingCustQuery = query(collection(db, 'customers'), where('assignedAgentId', '==', auth.currentUser.uid));
+        const existingCustDocs = await getDocs(existingCustQuery);
+        
+        existingCustDocs.docs.forEach(d => {
+          const data = d.data() as any; 
+          if (data.loanId) {
+            infoMap.set(String(data.loanId), { batchId: data.batchId || 'Legacy' });
+          }
+        });
+        setExistingLoansInfo(infoMap);
 
-          setExistingLoansInfo(infoMap);
-        } catch (error) {
-          console.error("Failed to fetch existing loans", error);
+        // 2. Fetch Campaigns / Templates for the dropdown
+        const campaignsRef = collection(db, 'campaigns');
+        const q = query(campaignsRef, where('agencyId', '==', agencyId));
+        const snapshot = await getDocs(q);
+        const loadedTemplates = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+
+        // Sort: Default templates first, then alphabetically
+        loadedTemplates.sort((a, b) => {
+          if (a.isDefault && !b.isDefault) return -1;
+          if (!a.isDefault && b.isDefault) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+        setTemplates(loadedTemplates);
+        
+        // Auto-select the first template (which will be the default if one exists)
+        if (loadedTemplates.length > 0) {
+          const userDefault = loadedTemplates.find(t => t.isDefault);
+          setSelectedTemplateId(userDefault ? userDefault.id : 'system-default-loan');
+        } else {
+          // Fallback if they haven't created any templates yet
+          setSelectedTemplateId('system-default-loan');
         }
+
+      } catch (error) {
+        console.error("Failed to fetch initial data", error);
       }
     };
-    fetchExistingData();
+    
+    fetchInitialData();
   }, []);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -184,6 +215,7 @@ export default function ImportScreen() {
 
   const handleImport = async () => {
     if (!auth.currentUser) return setError("Please log in again.");
+    if (!selectedTemplateId) return setError("Please select a Workflow Template.");
 
     setLoading(true);
     setError(null);
@@ -229,6 +261,9 @@ export default function ImportScreen() {
           address: item.address || '', 
           loanId: item.loanId || '',
           
+          // --- NEW: Attach the Campaign/Template ID to the record ---
+          campaignId: selectedTemplateId,
+
           // Support both legacy and new aggregate fields to keep the UI fully backwards compatible
           dueAmount: Number(item.dueAmount) || 0,
           totalDueAmount: Number(item.dueAmount) || 0,
@@ -276,10 +311,37 @@ export default function ImportScreen() {
   const validCount = extractedData.length - duplicateCount;
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-6 space-y-6 pb-24">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Import Collections</h1>
         <p className="text-sm text-slate-500 font-medium">Upload Documents, Images, or Excel sheets</p>
+      </div>
+
+      {/* --- NEW: Template Selector Section --- */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+        <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-wider">
+          <LayoutTemplate size={14} className="text-brand-500" />
+          Select Workflow Template
+        </label>
+        <select
+          value={selectedTemplateId}
+          onChange={(e) => setSelectedTemplateId(e.target.value)}
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-500 outline-none font-semibold text-slate-700 transition"
+        >
+          {/* ALWAYS show the uneditable System Default */}
+          <option value="system-default-loan" className="font-bold text-slate-900">
+            ⭐ System Default: Loan Collection
+          </option>
+          
+          {templates.map(t => (
+            <option key={t.id} value={t.id}>
+              {t.name} {t.isDefault ? '(Your Custom Default)' : ''}
+            </option>
+          ))}
+        </select>
+        <p className="text-[10px] text-slate-400">
+          This template determines what buttons and fields agents see when visiting these customers.
+        </p>
       </div>
 
       <AnimatePresence mode="wait">
@@ -310,7 +372,7 @@ export default function ImportScreen() {
             <button
               onClick={handleProcessFile}
               disabled={!file || processing}
-              className="w-full bg-brand-600 text-white p-5 rounded-2xl font-bold flex items-center justify-center space-x-3 disabled:opacity-50 shadow-lg shadow-brand-100"
+              className="w-full bg-brand-600 text-white p-4 rounded-xl font-bold flex items-center justify-center space-x-3 disabled:opacity-50 shadow-lg shadow-brand-100 hover:bg-brand-700 transition"
             >
               <span>Process Document</span>
             </button>
@@ -373,7 +435,7 @@ export default function ImportScreen() {
               </div>
               <button
                 onClick={() => { setExtractedData([]); setFile(null); }}
-                className="text-brand-600 font-bold text-sm"
+                className="text-brand-600 font-bold text-sm bg-brand-50 px-3 py-1.5 rounded-lg hover:bg-brand-100"
               >
                 Clear
               </button>
@@ -391,12 +453,12 @@ export default function ImportScreen() {
                 // --- EDIT MODE VIEW ---
                 if (isEditing) {
                   return (
-                    <div key={i} className="premium-card p-4 border-2 border-brand-500 shadow-lg space-y-3">
+                    <div key={i} className="bg-white p-4 rounded-2xl border-2 border-brand-500 shadow-md space-y-3">
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold text-slate-700 text-sm">Edit Record</span>
                         {isDuplicate && (
                           <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-md">
-                            ⚠️ Duplicate Loan ID (Batch: {duplicateInfo.batchId.substring(0, 8)}...)
+                            ⚠️ Duplicate (Batch: {duplicateInfo.batchId.substring(0, 8)}...)
                           </span>
                         )}
                       </div>
@@ -433,16 +495,16 @@ export default function ImportScreen() {
                         </div>
 
                         <div className="col-span-2 flex items-center space-x-2 mt-1">
-                          <input type="checkbox" id={`review-${i}`} checked={editForm.needsReview} onChange={e => handleFormChange('needsReview', e.target.checked)} className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500" />
+                          <input type="checkbox" id={`review-${i}`} checked={editForm.needsReview} onChange={e => handleFormChange('needsReview', e.target.checked)} className="w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500" />
                           <label htmlFor={`review-${i}`} className="text-sm font-medium text-slate-700 cursor-pointer">Needs Manual Review Flag</label>
                         </div>
                       </div>
 
                       <div className="flex justify-end space-x-2 mt-4 pt-4 border-t border-slate-100">
-                        <button onClick={handleCancelEdit} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 flex items-center">
+                        <button onClick={handleCancelEdit} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 flex items-center">
                           <X size={14} className="mr-1" /> Cancel
                         </button>
-                        <button onClick={() => handleSaveEdit(i)} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 rounded-lg hover:bg-brand-700 flex items-center">
+                        <button onClick={() => handleSaveEdit(i)} className="px-4 py-2 text-sm font-bold text-white bg-brand-600 rounded-xl hover:bg-brand-700 flex items-center">
                           <Check size={14} className="mr-1" /> Save
                         </button>
                       </div>
@@ -454,12 +516,12 @@ export default function ImportScreen() {
                 return (
                   <div
                     key={i}
-                    className={`premium-card p-4 border-l-4 flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${
+                    className={`bg-white rounded-2xl p-4 border-l-4 shadow-sm flex flex-col sm:flex-row sm:items-start justify-between gap-3 transition-colors ${
                       isDuplicate 
-                        ? 'border-red-400 bg-red-50/50 opacity-75' 
+                        ? 'border-red-400 bg-red-50/40 opacity-75' 
                         : item.needsReview
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-brand-500'
+                          ? 'border-amber-400 bg-amber-50/20'
+                          : 'border-brand-500 hover:border-brand-600'
                     }`}
                   >
                     <div className="flex-1">
@@ -474,7 +536,7 @@ export default function ImportScreen() {
                         )}
                         {isDuplicate && (
                           <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold" title={`From Batch: ${duplicateInfo.batchId}`}>
-                            Duplicate (Batch: {duplicateInfo.batchId.substring(0, 8)}...)
+                            Duplicate
                           </span>
                         )}
                       </div>
@@ -498,7 +560,7 @@ export default function ImportScreen() {
                       
                       <button 
                         onClick={() => handleEditClick(i, item)}
-                        className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors border border-transparent hover:border-brand-200"
                         title="Edit Row"
                       >
                         <Edit2 size={16} />
@@ -512,7 +574,7 @@ export default function ImportScreen() {
             <button
               onClick={handleImport}
               disabled={loading || validCount === 0}
-              className="w-full bg-brand-600 text-white p-5 rounded-2xl font-bold shadow-lg shadow-brand-100 flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full bg-brand-600 text-white p-4 rounded-xl font-bold shadow-lg shadow-brand-100 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-brand-700 transition"
             >
               {loading && <Loader2 className="w-5 h-5 animate-spin" />}
               {loading ? "Saving to Database..." : `Import ${validCount} Valid Records`}
@@ -525,7 +587,7 @@ export default function ImportScreen() {
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-red-50 text-red-600 p-4 rounded-2xl flex items-center space-x-3 border border-red-100"
+          className="bg-red-50 text-red-600 p-4 rounded-xl flex items-center space-x-3 border border-red-100"
         >
           <AlertCircle size={20} className="shrink-0" />
           <p className="text-xs font-bold">{error}</p>

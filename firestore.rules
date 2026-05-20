@@ -10,15 +10,20 @@ service cloud.firestore {
     function isSubscribed() {
       // PRODUCTION MODE: Replace with token check when ready
       return true;
-      // return request.auth.token.isSubscribed == true;
     }
 
-    // Core Multi-Tenancy validation function
+    // Core Multi-Tenancy validation function (Safely checks token)
     function isSameAgency(documentAgencyId) {
       // Allow if the document belongs to the user's own UID (manager or independent agent)
       return documentAgencyId == 'UNASSIGNED' ||
              documentAgencyId == request.auth.uid ||
-             (request.auth.token.agencyId != null && request.auth.token.agencyId == documentAgencyId);
+             ('agencyId' in request.auth.token && request.auth.token.agencyId == documentAgencyId);
+    }
+
+    // Helper to safely check if the user has Manager/Admin privileges without crashing
+    function hasManagerRole() {
+      return ('role' in request.auth.token && request.auth.token.role in ['agency_manager', 'independent_agent', 'admin']) ||
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'agent') in ['agency_manager', 'independent_agent', 'admin']);
     }
 
     // =========================================================
@@ -29,11 +34,7 @@ service cloud.firestore {
         // A user can read their own profile
         request.auth.uid == userId || 
         // OR an Admin/Manager/Independent Agent can read profiles within their SAME agency
-        (
-          (request.auth.token.role in ['agency_manager', 'admin', 'independent_agent'] || 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'admin', 'independent_agent']) &&
-          isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
-        )
+        (hasManagerRole() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')))
       );
       allow write: if isAuthenticated() && request.auth.uid == userId;
     }
@@ -54,15 +55,17 @@ service cloud.firestore {
     // Rules for Batches
     match /batches/{batchId} {
       allow read: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      allow create, update, delete: if isAuthenticated() 
-                                    && (request.resource.data.createdBy == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')));
+      allow create: if isAuthenticated() && (request.resource.data.createdBy == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')));
+      allow update: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')) && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'));
+      allow delete: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
     }
 
     // Rules for Interactions
     match /interactions/{interactionId} {
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      allow create, update, delete: if isAuthenticated() 
-                                    && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')));
+      allow create: if isAuthenticated() && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')));
+      allow update: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')) && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'));
+      allow delete: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
     }
 
     // Rules for Notifications
@@ -74,28 +77,24 @@ service cloud.firestore {
     // Rules for Visits
     match /visits/{visitId} {
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      allow create, update, delete: if isAuthenticated() 
-                                    && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) 
-                                    && isSubscribed();
+      allow create: if isAuthenticated() && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) && isSubscribed();
+      allow update: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')) && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')) && isSubscribed();
+      allow delete: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')) && isSubscribed();
     }
     
     // Rules for Follow-ups
     match /followups/{followupId} {
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      allow create, update, delete: if isAuthenticated() 
-                                    && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) 
-                                    && isSubscribed();
+      allow create: if isAuthenticated() && (request.resource.data.agentId == request.auth.uid || isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))) && isSubscribed();
+      allow update: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')) && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED')) && isSubscribed();
+      allow delete: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')) && isSubscribed();
     }
 
     // Rules for Cash Deposits
     match /cashDeposits/{depositId} {
       allow create: if isAuthenticated() && request.resource.data.agentId == request.auth.uid;
       allow read: if isAuthenticated() && (resource.data.agentId == request.auth.uid || isSameAgency(resource.data.get('agencyId', 'UNASSIGNED')));
-      // Allowed updates for agency managers and independent agents processing their own/their agents' deposits
-      allow update: if isAuthenticated() && 
-                    (request.auth.token.role in ['agency_manager', 'independent_agent'] || 
-                     get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'independent_agent']) && 
-                    isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
+      allow update: if isAuthenticated() && hasManagerRole() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
     }
 
     // =========================================================
@@ -103,18 +102,37 @@ service cloud.firestore {
     // =========================================================
     match /campaigns/{campaignId} {
       allow read: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
-      allow create, update, delete: if isAuthenticated() 
+      
+      // Separated create, update, and delete to prevent "request.resource is null" crashes
+      allow create: if isAuthenticated() 
         && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
-        && (request.auth.token.role in ['agency_manager', 'independent_agent', 'admin'] || 
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'independent_agent', 'admin']);
+        && hasManagerRole();
+        
+      allow update: if isAuthenticated() 
+        && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
+        && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
+        && hasManagerRole();
+        
+      allow delete: if isAuthenticated() 
+        && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
+        && hasManagerRole();
     }
 
     match /templates/{templateId} {
       allow read: if isAuthenticated() && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'));
-      allow create, update, delete: if isAuthenticated() 
+      
+      allow create: if isAuthenticated() 
         && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
-        && (request.auth.token.role in ['agency_manager', 'independent_agent', 'admin'] || 
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['agency_manager', 'independent_agent', 'admin']);
+        && hasManagerRole();
+        
+      allow update: if isAuthenticated() 
+        && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
+        && isSameAgency(request.resource.data.get('agencyId', 'UNASSIGNED'))
+        && hasManagerRole();
+        
+      allow delete: if isAuthenticated() 
+        && isSameAgency(resource.data.get('agencyId', 'UNASSIGNED'))
+        && hasManagerRole();
     }
 
     // Default deny for all other collections

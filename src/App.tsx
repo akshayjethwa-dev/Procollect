@@ -29,7 +29,9 @@ import PendingDepositsScreen from './screens/Admin/PendingDepositsScreen';
 import AgentDetailScreen from './screens/Admin/AgentDetailScreen';
 import DepositHistoryScreen from './screens/DepositHistoryScreen';
 import LiveMapScreen from './screens/Admin/LiveMapScreen';
-import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home } from 'lucide-react';
+import CampaignBuilderScreen from './screens/Admin/CampaignBuilderScreen'; // <-- NEW IMPORT
+
+import { Shield, Users, LogOut, Wallet, Menu, ChevronRight, MapPin, Home, LayoutTemplate } from 'lucide-react'; // <-- ADDED LayoutTemplate
 import { cn } from './lib/utils';
 
 // Accept userRole as a prop
@@ -118,7 +120,16 @@ const AdminLayout = ({ userRole }: { userRole: string | null }) => {
               <Users size={18} className="text-blue-400" /> Manage Agents
             </Link>
 
-            {/* NEW: Switch Button for Independent Agents */}
+            {/* NEW: Workflow Templates Link */}
+            <Link
+              to="/admin/campaigns"
+              onClick={() => setIsMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 transition font-medium"
+            >
+              <LayoutTemplate size={18} className="text-orange-400" /> Workflow Templates
+            </Link>
+
+            {/* Switch Button for Independent Agents */}
             {userRole === 'independent_agent' && (
               <div className="pt-4 mt-4 border-t border-slate-800">
                 <Link
@@ -233,6 +244,10 @@ export default function App() {
             <Route path="agents/:id" element={<AgentDetailScreen />} />
             <Route path="deposits" element={<PendingDepositsScreen />} />
             <Route path="map" element={<LiveMapScreen />} />
+            
+            {/* NEW: Workflow Templates Route */}
+            <Route path="campaigns" element={<CampaignBuilderScreen />} />
+            
             <Route path="*" element={<Navigate to="dashboard" />} />
           </Route>
         )}

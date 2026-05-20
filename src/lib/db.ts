@@ -1,6 +1,33 @@
 // src/lib/db.ts
 import Dexie, { Table } from 'dexie';
 
+export interface CampaignField {
+  id: string;
+  name: string;
+  type: 'text' | 'number' | 'currency' | 'date';
+  displayRole: 'primary' | 'secondary' | 'none'; // Defines what shows on the Agent's mobile card
+}
+
+export interface CampaignAction {
+  id: string;
+  name: string;
+  // Sub-action configurations: What to ask the agent when they select this action
+  requireAmount: boolean;
+  requireNotes: boolean;
+  requirePhoto: boolean;
+  requireNextDate: boolean;
+}
+
+export interface CampaignTemplate {
+  id?: string;
+  agencyId: string;
+  name: string;
+  isDefault: boolean;
+  schema: CampaignField[];
+  actions: CampaignAction[];
+  createdAt: string;
+}
+
 // NEW: Agency Table for Multi-tenancy Management
 export interface Agency {
   id: string;
