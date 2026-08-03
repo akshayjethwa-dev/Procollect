@@ -115,17 +115,55 @@ export default function ImportScreen() {
     multiple: false
   } as any);
 
+  // UPDATED: Advanced Fuzzy Matching & Fallback mapping to handle varying templates
   const mapRowsToCustomers = (data: any[]) => {
-    return data.map(row => ({
-      name: row['Name'] || row['Customer Name'] || row['name'] || 'Unknown',
-      loanId: String(row['Loan ID'] || row['Loan No'] || row['loanId'] || ''),
-      mobile: String(row['Phone'] || row['Mobile'] || row['phoneNumber'] || ''),
-      address: row['Address'] || row['Location'] || row['location'] || '',
-      dueAmount: Number(row['Due Amount'] || row['EMI'] || row['emiAmount'] || row['amount']) || 0,
-      dueDate: row['Due Date'] || row['dueDate'] || new Date().toISOString().split('T')[0],
-      needsReview: false,
-      assignedAgentId: '', 
-    })).filter(item => item.loanId && item.name !== 'Unknown');
+    return data.map((row, index) => {
+      
+      const getVal = (possibleKeys: string[]) => {
+        const rowKeys = Object.keys(row);
+        const matchedKey = rowKeys.find(k => 
+          possibleKeys.includes(k.toLowerCase().replace(/[^a-z0-9]/g, ''))
+        );
+        return matchedKey ? row[matchedKey] : undefined;
+      };
+
+      const name = getVal(['name', 'customername', 'clientname', 'fullname', 'borrower', 'debtor', 'company', 'companyname', 'customer', 'client', 'party']) || 'Unknown';
+      
+      let loanId = String(getVal(['loanid', 'loanno', 'loannumber', 'accountno', 'accountnumber', 'accountid', 'invoice', 'invoiceno', 'invoicenumber', 'id', 'reference', 'referenceno', 'refno', 'uuid']) || '');
+      
+      // Fallback: If no direct ID match is found, scan all headers for 'id', 'no', or 'number'
+      if (!loanId) {
+        const rowKeys = Object.keys(row);
+        const fallbackKey = rowKeys.find(k => {
+          const clean = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return clean.includes('id') || clean.includes('no') || clean.includes('number');
+        });
+        
+        if (fallbackKey) {
+          loanId = String(row[fallbackKey]);
+        } else {
+          // Ultimate fallback: generate a unique ID so the row processes successfully anyway
+          loanId = `IMP-${Date.now().toString().slice(-5)}-${index + 1}`;
+        }
+      }
+
+      const mobile = String(getVal(['phone', 'mobile', 'phonenumber', 'contact', 'contactno', 'contactnumber', 'cell', 'whatsapp', 'telephone']) || '');
+      const address = getVal(['address', 'location', 'city', 'area', 'region', 'state', 'fulladdress']) || '';
+      const dueAmount = Number(getVal(['dueamount', 'emi', 'emiamount', 'amount', 'balance', 'totaldue', 'due', 'outstanding', 'invoiceamount', 'total'])) || 0;
+      const dueDate = getVal(['duedate', 'date', 'emidate', 'paymentdate', 'deadline']) || new Date().toISOString().split('T')[0];
+
+      return {
+        name,
+        loanId,
+        mobile,
+        address,
+        dueAmount,
+        dueDate,
+        needsReview: false,
+        assignedAgentId: '', 
+      };
+    }).filter(item => item.name !== 'Unknown' || item.mobile !== ''); 
+    // Filter changed: As long as there is a name OR a mobile number, the record will import.
   };
 
   const handleProcessFile = async () => {
@@ -150,7 +188,12 @@ export default function ImportScreen() {
           header: true,
           skipEmptyLines: true,
           complete: (results) => {
-            setExtractedData(mapRowsToCustomers(results.data));
+            const mapped = mapRowsToCustomers(results.data);
+            if (mapped.length === 0) {
+              setError("No valid records found. Ensure your file has recognizable data rows.");
+            } else {
+              setExtractedData(mapped);
+            }
             setProcessing(false);
           },
           error: () => {
@@ -165,7 +208,12 @@ export default function ImportScreen() {
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-        setExtractedData(mapRowsToCustomers(data));
+        
+        const mappedData = mapRowsToCustomers(data);
+        if (mappedData.length === 0) {
+          throw new Error("No valid records found. Ensure your file has recognizable data rows.");
+        }
+        setExtractedData(mappedData);
       } else {
         setExtractionStatus("Uploading document securely...");
         const { url, path } = await uploadFieldDocument(file, (progress) => {
@@ -189,7 +237,7 @@ export default function ImportScreen() {
         );
 
         if (!data || !Array.isArray(data) || data.length === 0) {
-          throw new Error("No data found in this document. Please ensure it contains valid loan records.");
+          throw new Error("No data found in this document. Please ensure it contains valid records.");
         }
 
         setExtractedData(data.map(d => ({ ...d, assignedAgentId: '', documentUrl: url, documentPath: path })));
@@ -245,7 +293,7 @@ export default function ImportScreen() {
       const finalDataToImport = extractedData.filter(item => !existingLoansInfo.has(String(item.loanId)));
 
       if (finalDataToImport.length === 0) {
-        throw new Error("All items in this list are already in your database (duplicate Loan IDs).");
+        throw new Error("All items in this list are already in your database (duplicate records).");
       }
 
       const batchDocRef = doc(collection(db, 'batches'));
@@ -304,8 +352,6 @@ export default function ImportScreen() {
         await batch.commit();
       }
 
-      // --- ROUTING LOGIC UPDATE ---
-      // Send Managers back to the manager suite (assignments), Agents to their field app (customers)
       const isManager = currentUserRole === 'agency_manager' || currentUserRole === 'admin';
       
       if (isManager) {
