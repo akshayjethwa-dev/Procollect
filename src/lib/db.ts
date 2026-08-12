@@ -28,7 +28,7 @@ export interface CampaignTemplate {
   createdAt: string;
 }
 
-// NEW: Agency Table for Multi-tenancy Management
+// UPDATED: Agency Table for Multi-tenancy & Subscription Management
 export interface Agency {
   id: string;
   name: string;
@@ -37,6 +37,8 @@ export interface Agency {
   contactPhone?: string;
   status: 'active' | 'suspended' | 'inactive';
   subscriptionPlan: 'trial' | 'pro' | 'enterprise';
+  subscriptionExpiresAt?: string; // NEW: Date when current plan expires
+  maxAgentsAllowed?: number;       // NEW: Seat limit based on tier (e.g. Trial=2, Pro=10, Enterprise=50)
   createdAt: string;
   updatedAt?: string;
 }
@@ -121,6 +123,7 @@ export interface Notification {
   read: boolean;
 }
 
+// UPDATED: UserProfile Interface
 export interface UserProfile {
   uid: string;
   agencyId: string; 
@@ -128,8 +131,11 @@ export interface UserProfile {
   email: string;
   createdAt: string;
   photoURL?: string;
-  // UPDATED: Added 'independent_agent' role
   role?: 'admin' | 'agency_manager' | 'agent' | 'independent_agent'; 
+  // NEW: Optional plan details for independent_agent role
+  subscriptionPlan?: 'trial' | 'pro' | 'enterprise';
+  subscriptionExpiresAt?: string;
+  status?: 'active' | 'suspended' | 'inactive';
 }
 
 export interface CashDeposit {
@@ -158,14 +164,14 @@ export class ProCollectDatabase extends Dexie {
 
   constructor() {
     super('ProCollectDB');
-    this.version(5).stores({
-      agencies: 'id, adminId, status', 
+    this.version(6).stores({ // Bumped version to 6 for updated schema
+      agencies: 'id, adminId, status, subscriptionPlan', 
       customers: 'id, agencyId, assignedAgentId, status, mobile',
       loans: 'id, agencyId, customerId, loanId, assignedAgentId',
       visits: 'id, agencyId, customerId, agentId, date',
       followups: 'id, agencyId, customerId, agentId, scheduledAt, status',
       notifications: 'id, agencyId, agentId, sentAt, read',
-      users: 'uid, agencyId, email',
+      users: 'uid, agencyId, email, role, subscriptionPlan',
       cashDeposits: 'id, agencyId, agentId, status, createdAt'
     });
   }
